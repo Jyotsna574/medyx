@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "medical-agent-diagnosis-mad"
+version = "0.1.0"
+description = "MedicalAgentDiagnosis-MAD: Multimodal Agentic Diagnosis System"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+packages = [{include = "core"}, {include = "config"}, {include = "infrastructure"}, {include = "services"}, {include = "ui"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = "^0.34.0"
+pydantic-settings = "^2.9.0"
+streamlit = "^1.44.0"
+python-dotenv = "^1.0.0"
+pyyaml = "^6.0.0"
+openai = "^1.60.0"
+camel-ai = {extras = ["rag", "graph-rag"], version = "^0.2.85"}
+# Neo4j for Knowledge Graph
+neo4j = "^5.0.0"
+# Optional: Vision Engine Dependencies (uncomment to enable)
+# torch = "^2.0.0"
+# torchxrayvision = "^1.2.0"
+# scikit-image = "^0.24.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+pytest-asyncio = "^0.24.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,62 @@
+# LLM Provider Configuration for MedicalAgentDiagnosis-MAD
+# =========================================================
+# This file configures which LLM providers and models to use
+# for the multi-agent consultation system.
+
+# Default provider to use when not explicitly specified
+default_provider: gemini
+
+# Provider configurations
+providers:
+  # Google Gemini (default)
+  gemini:
+    platform: GEMINI
+    model: gemini-2.0-flash
+    temperature: 0.7
+    max_tokens: 4096
+    description: "Google Gemini 2.0 Flash - Fast, capable model"
+    api_key_env: GOOGLE_API_KEY
+
+  # OpenAI GPT-4
+  openai:
+    platform: OPENAI
+    model: gpt-4o-mini
+    temperature: 0.7
+    max_tokens: 4096
+    description: "OpenAI GPT-4o Mini - Cost-effective GPT-4 variant"
+    api_key_env: OPENAI_API_KEY
+
+  # OpenAI GPT-4 Turbo (higher capability)
+  openai_turbo:
+    platform: OPENAI
+    model: gpt-4-turbo
+    temperature: 0.5
+    max_tokens: 4096
+    description: "OpenAI GPT-4 Turbo - Higher capability for complex cases"
+    api_key_env: OPENAI_API_KEY
+
+  # Anthropic Claude
+  anthropic:
+    platform: ANTHROPIC
+    model: claude-3-5-sonnet-20241022
+    temperature: 0.7
+    max_tokens: 4096
+    description: "Anthropic Claude 3.5 Sonnet - Strong reasoning capabilities"
+    api_key_env: ANTHROPIC_API_KEY
+
+  # Local/Ollama (for development without API costs)
+  local:
+    platform: OLLAMA
+    model: llama3.1:8b
+    temperature: 0.7
+    max_tokens: 2048
+    description: "Local Ollama model - No API costs, runs locally"
+    base_url: http://localhost:11434
+
+# Model selection guidance
+# ========================
+# - gemini: Best balance of speed, cost, and capability (recommended default)
+# - openai: Good alternative if you prefer OpenAI ecosystem
+# - openai_turbo: Use for complex diagnostic cases requiring deeper reasoning
+# - anthropic: Excellent for nuanced medical reasoning and safety considerations
+# - local: Use for development/testing without API costs

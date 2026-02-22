@@ -1,0 +1,13 @@
+# Ignore model weights
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Ignore datasets
+data/
+datasets/
+
+# Ignore virtual environments
+venv/
+env/

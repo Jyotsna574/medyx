@@ -1,0 +1,75 @@
+# MedSAM-2 Environment Configuration
+# ====================================
+# Production environment for MedSAM-2 medical image segmentation
+# Compatible with CUDA 12.x (forward compatible with CUDA 13.0)
+#
+# Usage:
+#   conda env create -f environment.yml
+#   conda activate medsam2
+
+name: medsam2
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python version
+  - python=3.11
+
+  # PyTorch ecosystem with CUDA 12.4 (best compatibility with CUDA 13.0)
+  - pytorch>=2.4.0
+  - torchvision>=0.19.0
+  - torchaudio>=2.4.0
+  - pytorch-cuda=12.4
+
+  # Scientific computing
+  - numpy>=1.24.0,<2.0.0
+  - scipy>=1.11.0
+  - scikit-image>=0.22.0
+  - scikit-learn>=1.3.0
+
+  # Image processing
+  - pillow>=10.0.0
+  - opencv>=4.8.0
+  - imageio>=2.31.0
+
+  # Medical imaging
+  - pydicom>=2.4.0
+  - nibabel>=5.1.0
+  - simpleitk>=2.3.0
+
+  # Visualization
+  - matplotlib>=3.7.0
+
+  # Utilities
+  - tqdm>=4.65.0
+  - pyyaml>=6.0.0
+  - requests>=2.31.0
+
+  # Development
+  - pip>=23.0
+
+  # Pip packages (not available in conda or need specific versions)
+  - pip:
+      # Segment Anything 2 (SAM-2) - Meta's foundation model
+      - segment-anything-2>=1.0.0
+
+      # MedSAM-2 specific dependencies
+      - monai>=1.3.0
+      - connected-components-3d>=3.12.0
+
+      # HTTP/API utilities
+      - httpx>=0.25.0
+      - aiohttp>=3.9.0
+
+      # Hugging Face for model downloads
+      - huggingface-hub>=0.20.0
+
+      # Geometric analysis
+      - shapely>=2.0.0
+
+      # Production dependencies (from existing requirements.txt)
+      - pydantic>=2.5.0
+      - pydantic-settings>=2.1.0
