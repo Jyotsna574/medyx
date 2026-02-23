@@ -454,9 +454,25 @@ class HuggingFaceModelBackend(BaseModelBackend):
     
     def __init__(self, backend: HuggingFaceLocalBackend):
         """Initialize the CAMEL-compatible backend wrapper."""
+        # Store backend reference before calling super().__init__
         self._hf_backend = backend
-        self._model_type = ModelType.STUB
-        self._token_counter = None
+        self._hf_token_counter = None
+        
+        # Call parent __init__ with required parameters
+        super().__init__(
+            model_type=ModelType.STUB,
+            model_config_dict={
+                "model_type": "HuggingFaceLocal",
+                "model_path": backend.model_path_or_id,
+                "load_in_4bit": backend.load_in_4bit,
+            },
+            api_key=None,
+            url=None,
+            token_counter=None,  # We'll set this after loading tokenizer
+            timeout=300.0,  # 5 minute timeout for local models
+            max_retries=1,
+            extract_thinking_from_response=False,  # Not needed for local models
+        )
         
         # Pre-load tokenizer to enable token counting before first inference
         self._ensure_tokenizer_loaded()
@@ -477,24 +493,10 @@ class HuggingFaceModelBackend(BaseModelBackend):
             except Exception as e:
                 print(f"[HuggingFaceModelBackend] Warning: Could not load tokenizer: {e}")
         
-        # Create token counter with the tokenizer
-        if self._token_counter is None and self._hf_backend._tokenizer is not None:
-            self._token_counter = HuggingFaceTokenCounter(self._hf_backend._tokenizer)
+        # Create token counter with the tokenizer (use our own attribute to avoid conflict)
+        if self._hf_token_counter is None and self._hf_backend._tokenizer is not None:
+            self._hf_token_counter = HuggingFaceTokenCounter(self._hf_backend._tokenizer)
     
-    @property
-    def model_type(self) -> ModelType:
-        """Return the model type."""
-        return self._model_type
-    
-    @property
-    def model_config_dict(self) -> Dict[str, Any]:
-        """Return model configuration dictionary."""
-        return {
-            "model_type": "HuggingFaceLocal",
-            "model_path": self._hf_backend.model_path_or_id,
-            "load_in_4bit": self._hf_backend.load_in_4bit,
-            "device_map": self._hf_backend.device_map,
-        }
     
     def _extract_role(self, msg: Any) -> str:
         """Extract role string from various CAMEL-AI message formats."""
@@ -620,9 +622,9 @@ class HuggingFaceModelBackend(BaseModelBackend):
     @property 
     def token_counter(self) -> Any:
         """Return token counter for CAMEL-AI memory management."""
-        if self._token_counter is None:
+        if self._hf_token_counter is None:
             self._ensure_tokenizer_loaded()
-        return self._token_counter
+        return self._hf_token_counter
     
     def unload(self) -> None:
         """Unload the underlying backend."""
