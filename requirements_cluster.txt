@@ -1,34 +1,35 @@
-# Additional requirements for HPC cluster (Param Shakti / GPU nodes)
-# ===================================================================
-# These packages are needed for local HuggingFace model inference
-# with 4-bit quantization support.
+# Requirements for HPC Cluster (Param Shakti) - Local Models Only
+# ================================================================
+# This file is for running with LOCAL HuggingFace models.
+# Does NOT include google-generativeai or streamlit to avoid protobuf conflicts.
 #
-# Install with: pip install -r requirements_cluster.txt
-#
-# Note: PyTorch should be installed separately with CUDA support:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Install: pip install -r requirements_cluster.txt
 
-# Core transformers library for model loading and inference
+# Core
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.0
+loguru>=0.7.0
+
+# CAMEL-AI (base only, no rag extras to avoid protobuf>=6 requirement)
+camel-ai>=0.2.85
+
+# HuggingFace / Local Model Inference
 transformers>=4.40.0
-
-# Accelerate for distributed/multi-GPU inference
 accelerate>=0.30.0
-
-# BitsAndBytes for 4-bit/8-bit quantization
 bitsandbytes>=0.43.0
-
-# Tokenizer dependencies
 sentencepiece>=0.2.0
-protobuf>=4.25.0
+protobuf>=4.25.0,<6.0.0
 
-# Optional: Flash Attention 2 for faster inference (requires compilation)
-# Uncomment if your cluster supports it:
-# flash-attn>=2.5.0
+# PyTorch (install separately with CUDA support for your cluster)
+# pip install torch --index-url https://download.pytorch.org/whl/cu121
+# torch>=2.0.0
 
-# Optional: vLLM for high-throughput serving (alternative to transformers)
-# Uncomment if needed:
-# vllm>=0.4.0
+# Vision (MedSAM-2)
+numpy>=1.24.0
+Pillow>=10.0.0
+scikit-image>=0.22.0
 
-# Optional: DeepSpeed for inference optimization
-# Uncomment if needed:
-# deepspeed>=0.14.0
+# Knowledge Graph (optional - comment out if not using Neo4j)
+neo4j>=5.0.0
