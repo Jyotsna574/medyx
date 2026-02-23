@@ -100,6 +100,70 @@ class ChatCompletionResponse:
         return self
 
 
+class HuggingFaceTokenCounter:
+    """
+    Token counter for HuggingFace models, compatible with CAMEL-AI's expectations.
+    
+    Implements the count_tokens_from_messages interface required by CAMEL-AI's
+    memory system for context management.
+    """
+    
+    def __init__(self, tokenizer: Any):
+        """Initialize with a HuggingFace tokenizer."""
+        self._tokenizer = tokenizer
+    
+    def count_tokens_from_messages(self, messages: List[Any]) -> int:
+        """
+        Count tokens in a list of messages.
+        
+        Args:
+            messages: List of messages (dicts or CAMEL message objects).
+            
+        Returns:
+            Total token count.
+        """
+        if self._tokenizer is None:
+            return 0
+        
+        total_tokens = 0
+        for msg in messages:
+            content = ""
+            if isinstance(msg, dict):
+                content = msg.get("content", "")
+                role = msg.get("role", "")
+            elif hasattr(msg, "content"):
+                content = str(msg.content)
+                role = getattr(msg, "role", "")
+            else:
+                content = str(msg)
+                role = ""
+            
+            # Tokenize and count
+            text = f"{role}: {content}" if role else content
+            try:
+                tokens = self._tokenizer.encode(text, add_special_tokens=False)
+                total_tokens += len(tokens)
+            except Exception:
+                # Fallback: estimate 4 chars per token
+                total_tokens += len(text) // 4
+        
+        # Add overhead for message formatting (approx 4 tokens per message)
+        total_tokens += len(messages) * 4
+        
+        return total_tokens
+    
+    def count_tokens(self, text: str) -> int:
+        """Count tokens in a text string."""
+        if self._tokenizer is None:
+            return len(text) // 4
+        
+        try:
+            tokens = self._tokenizer.encode(text, add_special_tokens=False)
+            return len(tokens)
+        except Exception:
+            return len(text) // 4
+
+
 class HuggingFaceLocalBackend:
     """
     Local HuggingFace model backend compatible with CAMEL-AI ChatAgent.
@@ -392,6 +456,30 @@ class HuggingFaceModelBackend(BaseModelBackend):
         """Initialize the CAMEL-compatible backend wrapper."""
         self._hf_backend = backend
         self._model_type = ModelType.STUB
+        self._token_counter = None
+        
+        # Pre-load tokenizer to enable token counting before first inference
+        self._ensure_tokenizer_loaded()
+    
+    def _ensure_tokenizer_loaded(self) -> None:
+        """Ensure tokenizer is loaded for token counting."""
+        if self._hf_backend._tokenizer is None:
+            tf = _lazy_import_transformers()
+            print(f"[HuggingFaceModelBackend] Loading tokenizer for token counting...")
+            try:
+                self._hf_backend._tokenizer = tf["AutoTokenizer"].from_pretrained(
+                    self._hf_backend.model_path_or_id,
+                    trust_remote_code=True,
+                )
+                if self._hf_backend._tokenizer.pad_token is None:
+                    self._hf_backend._tokenizer.pad_token = self._hf_backend._tokenizer.eos_token
+                print(f"[HuggingFaceModelBackend] Tokenizer loaded successfully")
+            except Exception as e:
+                print(f"[HuggingFaceModelBackend] Warning: Could not load tokenizer: {e}")
+        
+        # Create token counter with the tokenizer
+        if self._token_counter is None and self._hf_backend._tokenizer is not None:
+            self._token_counter = HuggingFaceTokenCounter(self._hf_backend._tokenizer)
     
     @property
     def model_type(self) -> ModelType:
@@ -531,8 +619,10 @@ class HuggingFaceModelBackend(BaseModelBackend):
     
     @property 
     def token_counter(self) -> Any:
-        """Return token counter (not implemented for local models)."""
-        return None
+        """Return token counter for CAMEL-AI memory management."""
+        if self._token_counter is None:
+            self._ensure_tokenizer_loaded()
+        return self._token_counter
     
     def unload(self) -> None:
         """Unload the underlying backend."""
