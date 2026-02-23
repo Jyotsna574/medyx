@@ -18,11 +18,10 @@ Architecture:
 """
 
 import asyncio
-import os
 import sys
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from uuid import uuid4
 
 from loguru import logger

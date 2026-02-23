@@ -9,7 +9,6 @@ The backend is selected based on configuration (models.yaml) and
 environment variables (ACTIVE_PROVIDER, LOCAL_ACTIVE_MODEL, LOCAL_MODEL_PATH).
 """
 
-import os
 import re
 from dataclasses import dataclass
 from typing import Optional

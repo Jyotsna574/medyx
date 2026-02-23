@@ -389,6 +389,48 @@ class CAMELModelWrapper:
         self._backend = backend
         self.model_type = "HuggingFaceLocal"
     
+    def _extract_role(self, msg: Any) -> str:
+        """Extract role string from various CAMEL-AI message formats."""
+        # Try role attribute (may be RoleType enum or string)
+        if hasattr(msg, "role"):
+            role = msg.role
+            if isinstance(role, str):
+                return role.lower()
+            # Handle RoleType enum (has .value or .name)
+            if hasattr(role, "value"):
+                return str(role.value).lower()
+            if hasattr(role, "name"):
+                return str(role.name).lower()
+            return str(role).lower()
+        
+        # Try role_name attribute (CAMEL-AI BaseMessage)
+        if hasattr(msg, "role_name"):
+            role_name = msg.role_name
+            if isinstance(role_name, str):
+                # Map CAMEL role names to standard roles
+                role_lower = role_name.lower()
+                if "system" in role_lower:
+                    return "system"
+                elif "assistant" in role_lower:
+                    return "assistant"
+                else:
+                    return "user"
+            return "user"
+        
+        # Try dict access
+        if isinstance(msg, dict):
+            return msg.get("role", "user")
+        
+        return "user"
+    
+    def _extract_content(self, msg: Any) -> str:
+        """Extract content string from various CAMEL-AI message formats."""
+        if hasattr(msg, "content"):
+            return str(msg.content)
+        if isinstance(msg, dict):
+            return msg.get("content", str(msg))
+        return str(msg)
+    
     def run(
         self,
         messages: List[Any],
@@ -397,26 +439,26 @@ class CAMELModelWrapper:
         """
         Run inference compatible with CAMEL-AI's expectations.
         
-        CAMEL-AI passes messages in various formats. This method normalizes
-        them before passing to the backend.
+        CAMEL-AI passes messages in various formats (OpenAIMessage, BaseMessage,
+        dicts). This method normalizes them before passing to the backend.
         """
         # Normalize messages to list of dicts
         normalized_messages = []
         for msg in messages:
             if isinstance(msg, dict):
-                normalized_messages.append(msg)
-            elif hasattr(msg, "role") and hasattr(msg, "content"):
+                # Already a dict, ensure role is lowercase string
+                role = msg.get("role", "user")
+                if not isinstance(role, str):
+                    role = str(role).lower()
                 normalized_messages.append({
-                    "role": msg.role if isinstance(msg.role, str) else str(msg.role),
-                    "content": msg.content,
+                    "role": role,
+                    "content": msg.get("content", ""),
                 })
-            elif hasattr(msg, "to_dict"):
-                normalized_messages.append(msg.to_dict())
             else:
-                # Fallback: treat as user message
+                # Extract from CAMEL-AI message object
                 normalized_messages.append({
-                    "role": "user",
-                    "content": str(msg),
+                    "role": self._extract_role(msg),
+                    "content": self._extract_content(msg),
                 })
         
         return self._backend.run(normalized_messages, **kwargs)
