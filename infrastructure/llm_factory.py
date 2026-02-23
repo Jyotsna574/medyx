@@ -25,6 +25,9 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
+from camel.models.base_model import BaseModelBackend
+from camel.types import ModelType
+
 from config.settings import model_config
 
 
@@ -377,17 +380,33 @@ class HuggingFaceLocalBackend:
         return info
 
 
-class CAMELModelWrapper:
+class HuggingFaceModelBackend(BaseModelBackend):
     """
-    Wrapper that adapts HuggingFaceLocalBackend to CAMEL-AI's expected interface.
+    CAMEL-AI compatible model backend for local HuggingFace models.
     
-    CAMEL-AI's ChatAgent expects the model to have a specific interface.
-    This wrapper ensures compatibility by implementing the required methods.
+    Inherits from CAMEL-AI's BaseModelBackend to ensure full compatibility
+    with ChatAgent. Wraps our HuggingFaceLocalBackend for actual inference.
     """
     
     def __init__(self, backend: HuggingFaceLocalBackend):
+        """Initialize the CAMEL-compatible backend wrapper."""
         self._backend = backend
-        self.model_type = "HuggingFaceLocal"
+        self._model_type = ModelType.STUB  # Use STUB as placeholder for custom models
+    
+    @property
+    def model_type(self) -> ModelType:
+        """Return the model type."""
+        return self._model_type
+    
+    @property
+    def model_config_dict(self) -> Dict[str, Any]:
+        """Return model configuration dictionary."""
+        return {
+            "model_type": "HuggingFaceLocal",
+            "model_path": self._backend.model_path_or_id,
+            "load_in_4bit": self._backend.load_in_4bit,
+            "device_map": self._backend.device_map,
+        }
     
     def _extract_role(self, msg: Any) -> str:
         """Extract role string from various CAMEL-AI message formats."""
@@ -431,16 +450,18 @@ class CAMELModelWrapper:
             return msg.get("content", str(msg))
         return str(msg)
     
-    def run(
-        self,
-        messages: List[Any],
-        **kwargs,
-    ) -> ChatCompletionResponse:
+    def run(self, messages: List[Any]) -> "ChatCompletion":
         """
         Run inference compatible with CAMEL-AI's expectations.
         
         CAMEL-AI passes messages in various formats (OpenAIMessage, BaseMessage,
         dicts). This method normalizes them before passing to the backend.
+        
+        Args:
+            messages: List of messages in CAMEL-AI format.
+            
+        Returns:
+            ChatCompletion-like object with the response.
         """
         # Normalize messages to list of dicts
         normalized_messages = []
@@ -461,7 +482,60 @@ class CAMELModelWrapper:
                     "content": self._extract_content(msg),
                 })
         
-        return self._backend.run(normalized_messages, **kwargs)
+        # Run inference on the backend
+        response = self._backend.run(normalized_messages)
+        
+        # Convert to CAMEL-AI expected format (ChatCompletion-like)
+        return self._make_chat_completion(response)
+    
+    def _make_chat_completion(self, response: ChatCompletionResponse) -> Any:
+        """Convert our response to OpenAI ChatCompletion format that CAMEL expects."""
+        from types import SimpleNamespace
+        
+        # Create a structure that mimics OpenAI's ChatCompletion
+        message = SimpleNamespace(
+            role="assistant",
+            content=response.content,
+            function_call=None,
+            tool_calls=None,
+        )
+        
+        choice = SimpleNamespace(
+            index=0,
+            message=message,
+            finish_reason=response.finish_reason,
+        )
+        
+        usage = SimpleNamespace(
+            prompt_tokens=response.usage.get("prompt_tokens", 0),
+            completion_tokens=response.usage.get("completion_tokens", 0),
+            total_tokens=response.usage.get("total_tokens", 0),
+        )
+        
+        completion = SimpleNamespace(
+            id="hf-local-completion",
+            object="chat.completion",
+            created=0,
+            model=self._backend.model_path_or_id,
+            choices=[choice],
+            usage=usage,
+        )
+        
+        return completion
+    
+    def check_model_config(self) -> None:
+        """Check if model configuration is valid."""
+        pass  # Always valid for local models
+    
+    @property
+    def stream(self) -> bool:
+        """Return whether streaming is enabled."""
+        return False
+    
+    @property 
+    def token_counter(self) -> Any:
+        """Return token counter (not implemented for local models)."""
+        return None
     
     def unload(self) -> None:
         """Unload the underlying backend."""
@@ -569,8 +643,8 @@ def _create_camel_backend(provider: str):
     )
 
 
-def _create_huggingface_backend() -> CAMELModelWrapper:
-    """Create a HuggingFace local model backend."""
+def _create_huggingface_backend() -> HuggingFaceModelBackend:
+    """Create a HuggingFace local model backend compatible with CAMEL-AI."""
     local_config = model_config.get_local_model_config()
     
     if not local_config:
@@ -592,7 +666,7 @@ def _create_huggingface_backend() -> CAMELModelWrapper:
             )
         print(f"[LLM Factory] Using HuggingFace repo: {model_path_or_id}")
     
-    # Create the backend
+    # Create the underlying HuggingFace backend
     backend = HuggingFaceLocalBackend(
         model_path_or_id=model_path_or_id,
         load_in_4bit=local_config.get("load_in_4bit", True),
@@ -604,8 +678,8 @@ def _create_huggingface_backend() -> CAMELModelWrapper:
         generation_params=local_config.get("generation_params", {}),
     )
     
-    # Wrap for CAMEL-AI compatibility
-    return CAMELModelWrapper(backend)
+    # Wrap in CAMEL-AI compatible BaseModelBackend
+    return HuggingFaceModelBackend(backend)
 
 
 def get_provider_info() -> Dict[str, Any]:

@@ -139,10 +139,29 @@ async def run_simple_example():
 
 
 if __name__ == "__main__":
-    if not os.getenv("GOOGLE_API_KEY"):
-        print("ERROR: GOOGLE_API_KEY environment variable not set")
-        print("Set it with: $env:GOOGLE_API_KEY = 'your-key-here'")
-        sys.exit(1)
+    # Check for required credentials based on provider
+    active_provider = os.getenv("ACTIVE_PROVIDER", "gemini")
+    
+    if active_provider == "local":
+        # Local HuggingFace model - no API key needed
+        print(f"Using local model provider")
+        local_path = os.getenv("LOCAL_MODEL_PATH", "")
+        if local_path:
+            print(f"Model path: {local_path}")
+    elif active_provider == "gemini":
+        if not os.getenv("GOOGLE_API_KEY"):
+            print("ERROR: GOOGLE_API_KEY environment variable not set")
+            print("Set it with: export GOOGLE_API_KEY='your-key-here'")
+            print("Or use local model: ACTIVE_PROVIDER=local LOCAL_MODEL_PATH=/path/to/model")
+            sys.exit(1)
+    elif active_provider == "openai":
+        if not os.getenv("OPENAI_API_KEY"):
+            print("ERROR: OPENAI_API_KEY environment variable not set")
+            sys.exit(1)
+    elif active_provider == "anthropic":
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            print("ERROR: ANTHROPIC_API_KEY environment variable not set")
+            sys.exit(1)
     
     result = asyncio.run(run_example())
     
