@@ -1,14 +1,27 @@
 # LLM Provider Configuration for MedicalAgentDiagnosis-MAD
 # =========================================================
-# This file configures which LLM providers and models to use
-# for the multi-agent consultation system.
+# Switch between providers by changing active_provider.
+# For local models, change active_model under the local provider.
+#
+# Usage:
+#   - Gemini (cloud): active_provider: gemini
+#   - Local HuggingFace: active_provider: local
+#
+# Environment variable overrides:
+#   - ACTIVE_PROVIDER: overrides active_provider below
+#   - LOCAL_ACTIVE_MODEL: overrides local.active_model below
+#   - LOCAL_MODEL_PATH: use a local path instead of HuggingFace download
 
-# Default provider to use when not explicitly specified
-default_provider: gemini
+# ============================================================
+# ACTIVE PROVIDER - Change this one line to switch everything
+# ============================================================
+active_provider: gemini
 
 # Provider configurations
 providers:
-  # Google Gemini (default)
+  # --------------------------------------------------------
+  # Google Gemini (Cloud API)
+  # --------------------------------------------------------
   gemini:
     platform: GEMINI
     model: gemini-2.0-flash
@@ -17,7 +30,9 @@ providers:
     description: "Google Gemini 2.0 Flash - Fast, capable model"
     api_key_env: GOOGLE_API_KEY
 
-  # OpenAI GPT-4
+  # --------------------------------------------------------
+  # OpenAI GPT-4 (Cloud API)
+  # --------------------------------------------------------
   openai:
     platform: OPENAI
     model: gpt-4o-mini
@@ -26,7 +41,6 @@ providers:
     description: "OpenAI GPT-4o Mini - Cost-effective GPT-4 variant"
     api_key_env: OPENAI_API_KEY
 
-  # OpenAI GPT-4 Turbo (higher capability)
   openai_turbo:
     platform: OPENAI
     model: gpt-4-turbo
@@ -35,7 +49,9 @@ providers:
     description: "OpenAI GPT-4 Turbo - Higher capability for complex cases"
     api_key_env: OPENAI_API_KEY
 
-  # Anthropic Claude
+  # --------------------------------------------------------
+  # Anthropic Claude (Cloud API)
+  # --------------------------------------------------------
   anthropic:
     platform: ANTHROPIC
     model: claude-3-5-sonnet-20241022
@@ -44,8 +60,84 @@ providers:
     description: "Anthropic Claude 3.5 Sonnet - Strong reasoning capabilities"
     api_key_env: ANTHROPIC_API_KEY
 
-  # Local/Ollama (for development without API costs)
+  # --------------------------------------------------------
+  # Local HuggingFace Models (GPU Cluster / On-Premise)
+  # --------------------------------------------------------
   local:
+    # Change this to switch between local models
+    active_model: med42_8b
+
+    # Default generation parameters for all local models
+    default_params:
+      temperature: 0.7
+      max_new_tokens: 2048
+      do_sample: true
+      top_p: 0.95
+      repetition_penalty: 1.1
+
+    # Available local models
+    models:
+      # --------------------------------------------------
+      # 7B-8B Models (~5-6GB VRAM with 4-bit quantization)
+      # --------------------------------------------------
+      biomistral_7b:
+        repo_id: BioMistral/BioMistral-7B
+        load_in_4bit: true
+        device_map: auto
+        torch_dtype: bfloat16
+        bnb_4bit_compute_dtype: bfloat16
+        bnb_4bit_quant_type: nf4
+        use_double_quant: true
+        notes: "7B, ~5GB VRAM, good starting point for medical tasks"
+
+      med42_8b:
+        repo_id: m42-health/med42-v2-8B
+        load_in_4bit: true
+        device_map: auto
+        torch_dtype: bfloat16
+        bnb_4bit_compute_dtype: bfloat16
+        bnb_4bit_quant_type: nf4
+        use_double_quant: true
+        notes: "8B, ~6GB VRAM, best balance for medical diagnosis"
+
+      # --------------------------------------------------
+      # 70B Models (~40GB VRAM with 4-bit quantization)
+      # Suitable for multi-GPU setups (Param Shakti 2xGPU)
+      # --------------------------------------------------
+      meditron_70b:
+        repo_id: epfl-llm/meditron-70b
+        load_in_4bit: true
+        device_map: auto
+        torch_dtype: bfloat16
+        bnb_4bit_compute_dtype: bfloat16
+        bnb_4bit_quant_type: nf4
+        use_double_quant: true
+        notes: "70B, ~40GB VRAM, strong medical LLM from EPFL"
+
+      clinical_camel_70b:
+        repo_id: wanglab/ClinicalCamel-70B
+        load_in_4bit: true
+        device_map: auto
+        torch_dtype: bfloat16
+        bnb_4bit_compute_dtype: bfloat16
+        bnb_4bit_quant_type: nf4
+        use_double_quant: true
+        notes: "70B, ~40GB VRAM, clinical-focused fine-tuned LLaMA"
+
+      openbiollm_70b:
+        repo_id: aaditya/Llama3-OpenBioLLM-70B
+        load_in_4bit: true
+        device_map: auto
+        torch_dtype: bfloat16
+        bnb_4bit_compute_dtype: bfloat16
+        bnb_4bit_quant_type: nf4
+        use_double_quant: true
+        notes: "70B, ~40GB VRAM, newest and strongest biomedical LLM"
+
+  # --------------------------------------------------------
+  # Local Ollama (Development without API costs)
+  # --------------------------------------------------------
+  ollama:
     platform: OLLAMA
     model: llama3.1:8b
     temperature: 0.7
@@ -55,8 +147,19 @@ providers:
 
 # Model selection guidance
 # ========================
-# - gemini: Best balance of speed, cost, and capability (recommended default)
-# - openai: Good alternative if you prefer OpenAI ecosystem
-# - openai_turbo: Use for complex diagnostic cases requiring deeper reasoning
-# - anthropic: Excellent for nuanced medical reasoning and safety considerations
-# - local: Use for development/testing without API costs
+# Cloud APIs (require API keys):
+#   - gemini: Best balance of speed, cost, and capability (recommended default)
+#   - openai: Good alternative if you prefer OpenAI ecosystem
+#   - anthropic: Excellent for nuanced medical reasoning
+#
+# Local Models (require GPU):
+#   - biomistral_7b: Lightweight, good for development/testing
+#   - med42_8b: Best balance for production medical diagnosis
+#   - meditron_70b: Strong medical reasoning, needs 2x24GB GPUs
+#   - clinical_camel_70b: Clinical focus, needs 2x24GB GPUs
+#   - openbiollm_70b: State-of-the-art biomedical, needs 2x24GB GPUs
+#
+# HPC Cluster Usage (Param Shakti):
+#   1. Download model once: huggingface-cli download <repo_id> --local-dir ~/models/<name>
+#   2. Set LOCAL_MODEL_PATH=~/models/<name>
+#   3. Run with ACTIVE_PROVIDER=local

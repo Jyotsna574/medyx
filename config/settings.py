@@ -1,6 +1,7 @@
 """Configuration management for MedicalAgentDiagnosis-MAD.
 
 Loads settings from environment variables and YAML configuration files.
+Supports switching between cloud APIs (Gemini, OpenAI) and local HuggingFace models.
 """
 
 import os
@@ -34,7 +35,32 @@ def load_yaml_config(filename: str) -> dict[str, Any]:
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Application settings loaded from environment variables.
+    
+    Environment Variables:
+        API Keys:
+            GOOGLE_API_KEY: Google/Gemini API key
+            OPENAI_API_KEY: OpenAI API key
+            ANTHROPIC_API_KEY: Anthropic API key
+        
+        Database:
+            NEO4J_URI: Neo4j connection URI
+            NEO4J_USERNAME: Neo4j username
+            NEO4J_PASSWORD: Neo4j password
+        
+        Model Selection:
+            ACTIVE_PROVIDER: Override active_provider in models.yaml
+                             Options: 'gemini', 'openai', 'anthropic', 'local', 'ollama'
+            LOCAL_ACTIVE_MODEL: Override active_model for local provider
+                                Options: 'biomistral_7b', 'med42_8b', 'meditron_70b', etc.
+            LOCAL_MODEL_PATH: Path to pre-downloaded model directory
+                              If set, skips HuggingFace download and loads from this path
+        
+        Application:
+            APP_NAME: Application name
+            DEBUG: Debug mode
+            LOG_LEVEL: Logging level
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -52,6 +78,20 @@ class Settings(BaseSettings):
     neo4j_username: str = Field(default="neo4j", description="Neo4j username")
     neo4j_password: str = Field(default="", description="Neo4j password")
 
+    # Model Selection - Environment variable overrides for models.yaml
+    active_provider: str = Field(
+        default="",
+        description="Override active_provider in models.yaml. Options: gemini, openai, anthropic, local, ollama"
+    )
+    local_active_model: str = Field(
+        default="",
+        description="Override active_model for local HuggingFace provider. Options: biomistral_7b, med42_8b, meditron_70b, clinical_camel_70b, openbiollm_70b"
+    )
+    local_model_path: str = Field(
+        default="",
+        description="Path to pre-downloaded model directory. Skips HuggingFace download if set."
+    )
+
     # Application Settings
     app_name: str = Field(default="MedicalAgentDiagnosis-MAD", description="Application name")
     debug: bool = Field(default=False, description="Debug mode")
@@ -59,27 +99,46 @@ class Settings(BaseSettings):
 
 
 class ModelConfig:
-    """Configuration for LLM models loaded from models.yaml."""
+    """Configuration for LLM models loaded from models.yaml.
+    
+    Handles both cloud API providers and local HuggingFace models.
+    Environment variables take precedence over YAML configuration.
+    """
     
     def __init__(self):
         self._config = load_yaml_config("models.yaml")
-        self._default = self._config.get("default_provider", "gemini")
+        self._settings = Settings()
+        self._reload_active_provider()
+    
+    def _reload_active_provider(self):
+        """Determine the active provider from env vars or config."""
+        # Environment variable takes precedence
+        if self._settings.active_provider:
+            self._active_provider = self._settings.active_provider
+        else:
+            self._active_provider = self._config.get("active_provider", "gemini")
     
     @property
-    def default_provider(self) -> str:
-        """Get the default LLM provider name."""
-        return self._default
+    def active_provider(self) -> str:
+        """Get the currently active LLM provider name."""
+        return self._active_provider
+    
+    @property
+    def is_local_provider(self) -> bool:
+        """Check if the active provider is a local HuggingFace model."""
+        return self._active_provider == "local"
     
     def get_provider_config(self, provider: Optional[str] = None) -> dict[str, Any]:
         """Get configuration for a specific provider.
         
         Args:
-            provider: Provider name (e.g., 'openai', 'gemini'). Uses default if None.
+            provider: Provider name (e.g., 'openai', 'gemini', 'local'). 
+                     Uses active provider if None.
             
         Returns:
             Provider configuration dict with model, temperature, max_tokens, etc.
         """
-        provider = provider or self._default
+        provider = provider or self._active_provider
         providers = self._config.get("providers", {})
         return providers.get(provider, {})
     
@@ -91,17 +150,96 @@ class ModelConfig:
     def get_temperature(self, provider: Optional[str] = None) -> float:
         """Get the temperature setting for a provider."""
         config = self.get_provider_config(provider)
+        
+        # For local provider, check default_params
+        if (provider or self._active_provider) == "local":
+            default_params = config.get("default_params", {})
+            return default_params.get("temperature", 0.7)
+        
         return config.get("temperature", 0.7)
     
     def get_max_tokens(self, provider: Optional[str] = None) -> int:
         """Get the max_tokens setting for a provider."""
         config = self.get_provider_config(provider)
+        
+        # For local provider, check default_params
+        if (provider or self._active_provider) == "local":
+            default_params = config.get("default_params", {})
+            return default_params.get("max_new_tokens", 2048)
+        
         return config.get("max_tokens", 2048)
     
+    def get_local_model_config(self) -> dict[str, Any]:
+        """Get configuration for the active local HuggingFace model.
+        
+        Returns:
+            Dictionary with repo_id, load_in_4bit, device_map, etc.
+            Returns empty dict if local provider is not configured.
+        """
+        local_config = self.get_provider_config("local")
+        if not local_config:
+            return {}
+        
+        # Determine which local model to use
+        # Priority: LOCAL_ACTIVE_MODEL env var > active_model in yaml
+        if self._settings.local_active_model:
+            active_model = self._settings.local_active_model
+        else:
+            active_model = local_config.get("active_model", "med42_8b")
+        
+        models = local_config.get("models", {})
+        model_config = models.get(active_model, {})
+        
+        # Add active model name to the config
+        model_config["model_name"] = active_model
+        
+        # Add default generation params
+        model_config["generation_params"] = local_config.get("default_params", {})
+        
+        return model_config
+    
+    def get_local_model_path(self) -> Optional[str]:
+        """Get the local model path if set via environment variable.
+        
+        Returns:
+            Path string if LOCAL_MODEL_PATH is set, None otherwise.
+        """
+        if self._settings.local_model_path:
+            return self._settings.local_model_path
+        return None
+    
+    def get_api_key(self, provider: Optional[str] = None) -> str:
+        """Get the API key for a cloud provider.
+        
+        Args:
+            provider: Provider name. Uses active provider if None.
+            
+        Returns:
+            API key string, or empty string if not found.
+        """
+        provider = provider or self._active_provider
+        config = self.get_provider_config(provider)
+        
+        # Get the environment variable name for the API key
+        api_key_env = config.get("api_key_env", "")
+        if api_key_env:
+            return os.getenv(api_key_env, "")
+        
+        # Fallback to common patterns
+        if provider == "gemini":
+            return self._settings.google_api_key
+        elif provider == "openai" or provider == "openai_turbo":
+            return self._settings.openai_api_key
+        elif provider == "anthropic":
+            return self._settings.anthropic_api_key
+        
+        return ""
+    
     def reload(self):
-        """Reload configuration from disk."""
+        """Reload configuration from disk and environment."""
         self._config = load_yaml_config("models.yaml")
-        self._default = self._config.get("default_provider", "gemini")
+        self._settings = Settings()
+        self._reload_active_provider()
 
 
 class ExpertConfig:

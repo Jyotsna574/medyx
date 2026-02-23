@@ -5,6 +5,10 @@ This module implements a fully interactive MAS using the CAMEL-AI framework,
 coordinating specialized agents that process scans and symptoms, retrieve
 knowledge, and debate to reach clinical consensus.
 
+Supports both cloud APIs (Gemini, OpenAI, Anthropic) and local HuggingFace
+models via the LLM factory. The backend is selected based on configuration
+(models.yaml) and environment variables.
+
 Architecture:
     1. ClinicalHistoryAgent - Parses symptoms into structured clinical history
     2. VisionAnalysisAgent - Executes MedSAM-2 pipeline for geometric metrics
@@ -26,8 +30,6 @@ from pydantic import BaseModel, Field
 
 from camel.agents import ChatAgent
 from camel.messages import BaseMessage
-from camel.models import ModelFactory
-from camel.types import ModelPlatformType, ModelType
 
 from core.schemas import DiagnosticReport, PatientCase, VisionMetrics
 from infrastructure.vision.medsam2_engine import (
@@ -35,6 +37,7 @@ from infrastructure.vision.medsam2_engine import (
     DomainConfig,
 )
 from infrastructure.rag.neo4j_retriever import Neo4jKnowledgeRetriever
+from infrastructure.llm_factory import get_llm_backend, get_provider_info
 
 
 # =============================================================================
@@ -510,18 +513,22 @@ class MASOrchestrator:
         logger.info("MAS Orchestrator initialized successfully")
     
     def _init_agents(self):
-        """Initialize all CAMEL-AI agents."""
+        """Initialize all CAMEL-AI agents.
+        
+        Uses the LLM factory to get the appropriate backend based on
+        configuration (models.yaml) and environment variables.
+        """
         logger.info("Initializing CAMEL-AI agents...")
         
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable required")
+        # Get provider info for logging
+        provider_info = get_provider_info()
+        logger.info(f"LLM Provider: {provider_info['active_provider']}")
+        if provider_info['is_local']:
+            local_config = provider_info.get('local_model_config', {})
+            logger.info(f"Local Model: {local_config.get('model_name', 'unknown')}")
         
-        self.model = ModelFactory.create(
-            model_platform=ModelPlatformType.GEMINI,
-            model_type=ModelType.GEMINI_2_0_FLASH,
-            api_key=api_key,
-        )
+        # Get the LLM backend from factory
+        self.model = get_llm_backend()
         
         self.clinical_history_agent = ChatAgent(
             system_message=BaseMessage.make_assistant_message(

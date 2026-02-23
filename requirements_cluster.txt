@@ -1,0 +1,34 @@
+# Additional requirements for HPC cluster (Param Shakti / GPU nodes)
+# ===================================================================
+# These packages are needed for local HuggingFace model inference
+# with 4-bit quantization support.
+#
+# Install with: pip install -r requirements_cluster.txt
+#
+# Note: PyTorch should be installed separately with CUDA support:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# Core transformers library for model loading and inference
+transformers>=4.40.0
+
+# Accelerate for distributed/multi-GPU inference
+accelerate>=0.30.0
+
+# BitsAndBytes for 4-bit/8-bit quantization
+bitsandbytes>=0.43.0
+
+# Tokenizer dependencies
+sentencepiece>=0.2.0
+protobuf>=4.25.0
+
+# Optional: Flash Attention 2 for faster inference (requires compilation)
+# Uncomment if your cluster supports it:
+# flash-attn>=2.5.0
+
+# Optional: vLLM for high-throughput serving (alternative to transformers)
+# Uncomment if needed:
+# vllm>=0.4.0
+
+# Optional: DeepSpeed for inference optimization
+# Uncomment if needed:
+# deepspeed>=0.14.0

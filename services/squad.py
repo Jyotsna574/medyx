@@ -2,8 +2,11 @@
 Multi-Agent Medical Consultation System.
 
 This module implements a sophisticated multi-expert consultation using 
-CAMEL-AI agents powered by Google Gemini. Multiple medical experts 
-discuss the case and reach a consensus diagnosis.
+CAMEL-AI agents. Supports both cloud APIs (Gemini, OpenAI, Anthropic) and
+local HuggingFace models via the LLM factory.
+
+The backend is selected based on configuration (models.yaml) and
+environment variables (ACTIVE_PROVIDER, LOCAL_ACTIVE_MODEL, LOCAL_MODEL_PATH).
 """
 
 import os
@@ -13,10 +16,9 @@ from typing import Optional
 
 from camel.agents import ChatAgent
 from camel.messages import BaseMessage
-from camel.models import ModelFactory
-from camel.types import ModelPlatformType, ModelType
 
 from core.schemas import VisionMetrics
+from infrastructure.llm_factory import get_llm_backend, get_provider_info
 
 
 @dataclass
@@ -130,6 +132,9 @@ def run_consultation(metrics: VisionMetrics, guidelines: str) -> ConsultationRes
     2. Senior Pulmonologist - Provides clinical interpretation
     3. Medical Director - Synthesizes and finalizes diagnosis
     
+    The LLM backend is determined by configuration (models.yaml) and
+    environment variables (ACTIVE_PROVIDER, LOCAL_ACTIVE_MODEL).
+    
     Args:
         metrics: Vision metrics from AI image analysis.
         guidelines: Medical guidelines from knowledge base.
@@ -137,19 +142,14 @@ def run_consultation(metrics: VisionMetrics, guidelines: str) -> ConsultationRes
     Returns:
         ConsultationResult with diagnosis and full discussion.
     """
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        raise ValueError("GOOGLE_API_KEY environment variable is not set")
+    # Get the LLM backend from factory (Gemini, OpenAI, local HuggingFace, etc.)
+    provider_info = get_provider_info()
+    print(f"[Squad] Using LLM provider: {provider_info['active_provider']}")
+    
+    model = get_llm_backend()
 
     # Format the vision findings
     findings_text = _format_findings(metrics)
-    
-    # Create the Gemini model
-    model = ModelFactory.create(
-        model_platform=ModelPlatformType.GEMINI,
-        model_type=ModelType.GEMINI_2_0_FLASH,
-        api_key=api_key,
-    )
     
     # Create expert agents
     radiologist = ChatAgent(
