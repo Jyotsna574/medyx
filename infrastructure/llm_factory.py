@@ -390,8 +390,8 @@ class HuggingFaceModelBackend(BaseModelBackend):
     
     def __init__(self, backend: HuggingFaceLocalBackend):
         """Initialize the CAMEL-compatible backend wrapper."""
-        self._backend = backend
-        self._model_type = ModelType.STUB  # Use STUB as placeholder for custom models
+        self._hf_backend = backend
+        self._model_type = ModelType.STUB
     
     @property
     def model_type(self) -> ModelType:
@@ -403,30 +403,26 @@ class HuggingFaceModelBackend(BaseModelBackend):
         """Return model configuration dictionary."""
         return {
             "model_type": "HuggingFaceLocal",
-            "model_path": self._backend.model_path_or_id,
-            "load_in_4bit": self._backend.load_in_4bit,
-            "device_map": self._backend.device_map,
+            "model_path": self._hf_backend.model_path_or_id,
+            "load_in_4bit": self._hf_backend.load_in_4bit,
+            "device_map": self._hf_backend.device_map,
         }
     
     def _extract_role(self, msg: Any) -> str:
         """Extract role string from various CAMEL-AI message formats."""
-        # Try role attribute (may be RoleType enum or string)
         if hasattr(msg, "role"):
             role = msg.role
             if isinstance(role, str):
                 return role.lower()
-            # Handle RoleType enum (has .value or .name)
             if hasattr(role, "value"):
                 return str(role.value).lower()
             if hasattr(role, "name"):
                 return str(role.name).lower()
             return str(role).lower()
         
-        # Try role_name attribute (CAMEL-AI BaseMessage)
         if hasattr(msg, "role_name"):
             role_name = msg.role_name
             if isinstance(role_name, str):
-                # Map CAMEL role names to standard roles
                 role_lower = role_name.lower()
                 if "system" in role_lower:
                     return "system"
@@ -436,7 +432,6 @@ class HuggingFaceModelBackend(BaseModelBackend):
                     return "user"
             return "user"
         
-        # Try dict access
         if isinstance(msg, dict):
             return msg.get("role", "user")
         
@@ -450,49 +445,29 @@ class HuggingFaceModelBackend(BaseModelBackend):
             return msg.get("content", str(msg))
         return str(msg)
     
-    def run(self, messages: List[Any]) -> "ChatCompletion":
-        """
-        Run inference compatible with CAMEL-AI's expectations.
-        
-        CAMEL-AI passes messages in various formats (OpenAIMessage, BaseMessage,
-        dicts). This method normalizes them before passing to the backend.
-        
-        Args:
-            messages: List of messages in CAMEL-AI format.
-            
-        Returns:
-            ChatCompletion-like object with the response.
-        """
-        # Normalize messages to list of dicts
-        normalized_messages = []
+    def _normalize_messages(self, messages: List[Any]) -> List[Dict[str, str]]:
+        """Normalize CAMEL-AI messages to simple dicts."""
+        normalized = []
         for msg in messages:
             if isinstance(msg, dict):
-                # Already a dict, ensure role is lowercase string
                 role = msg.get("role", "user")
                 if not isinstance(role, str):
                     role = str(role).lower()
-                normalized_messages.append({
+                normalized.append({
                     "role": role,
                     "content": msg.get("content", ""),
                 })
             else:
-                # Extract from CAMEL-AI message object
-                normalized_messages.append({
+                normalized.append({
                     "role": self._extract_role(msg),
                     "content": self._extract_content(msg),
                 })
-        
-        # Run inference on the backend
-        response = self._backend.run(normalized_messages)
-        
-        # Convert to CAMEL-AI expected format (ChatCompletion-like)
-        return self._make_chat_completion(response)
+        return normalized
     
     def _make_chat_completion(self, response: ChatCompletionResponse) -> Any:
         """Convert our response to OpenAI ChatCompletion format that CAMEL expects."""
         from types import SimpleNamespace
         
-        # Create a structure that mimics OpenAI's ChatCompletion
         message = SimpleNamespace(
             role="assistant",
             content=response.content,
@@ -516,16 +491,38 @@ class HuggingFaceModelBackend(BaseModelBackend):
             id="hf-local-completion",
             object="chat.completion",
             created=0,
-            model=self._backend.model_path_or_id,
+            model=self._hf_backend.model_path_or_id,
             choices=[choice],
             usage=usage,
         )
         
         return completion
     
+    def _run(self, messages: List[Any]) -> Any:
+        """
+        Required abstract method from BaseModelBackend.
+        Synchronous inference method called by CAMEL-AI.
+        """
+        normalized_messages = self._normalize_messages(messages)
+        response = self._hf_backend.run(normalized_messages)
+        return self._make_chat_completion(response)
+    
+    async def _arun(self, messages: List[Any]) -> Any:
+        """
+        Required abstract method from BaseModelBackend.
+        Async inference method - runs sync version in executor for compatibility.
+        """
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._run, messages)
+    
+    def run(self, messages: List[Any]) -> Any:
+        """Public run method that delegates to _run."""
+        return self._run(messages)
+    
     def check_model_config(self) -> None:
         """Check if model configuration is valid."""
-        pass  # Always valid for local models
+        pass
     
     @property
     def stream(self) -> bool:
@@ -539,11 +536,11 @@ class HuggingFaceModelBackend(BaseModelBackend):
     
     def unload(self) -> None:
         """Unload the underlying backend."""
-        self._backend.unload()
+        self._hf_backend.unload()
     
     def get_info(self) -> Dict[str, Any]:
         """Get backend information."""
-        return self._backend.get_info()
+        return self._hf_backend.get_info()
 
 
 def get_llm_backend(provider: Optional[str] = None):
