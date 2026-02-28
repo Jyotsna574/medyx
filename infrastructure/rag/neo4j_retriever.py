@@ -1,9 +1,12 @@
-"""Neo4j Knowledge Graph Retriever for medical data."""
+"""Neo4j Knowledge Graph Retriever for medical data.
+
+Neo4j driver is imported lazily - if neo4j package is not installed,
+connect() fails gracefully and fallback guidelines are used.
+This allows running on clusters (e.g. Param Shakti) without Neo4j.
+"""
 
 import os
 from typing import Optional
-
-from neo4j import GraphDatabase
 
 
 class Neo4jKnowledgeRetriever:
@@ -40,6 +43,7 @@ class Neo4jKnowledgeRetriever:
             True if connection successful, False otherwise.
         """
         try:
+            from neo4j import GraphDatabase
             self._driver = GraphDatabase.driver(
                 self.uri, 
                 auth=(self.username, self.password)
@@ -47,6 +51,10 @@ class Neo4jKnowledgeRetriever:
             self._driver.verify_connectivity()
             self._connected = True
             return True
+        except ImportError:
+            print("Neo4j package not installed. Using fallback guidelines. Install with: pip install neo4j")
+            self._connected = False
+            return False
         except Exception as e:
             print(f"Neo4j connection failed: {e}")
             self._connected = False

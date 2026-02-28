@@ -23,7 +23,7 @@ Environment Variables:
 import gc
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from camel.models.base_model import BaseModelBackend
 from camel.types import ModelType
@@ -55,14 +55,12 @@ def _lazy_import_transformers():
                 AutoModelForCausalLM,
                 AutoTokenizer,
                 BitsAndBytesConfig,
-                GenerationConfig,
             )
             _transformers = {
                 "module": transformers,
                 "AutoModelForCausalLM": AutoModelForCausalLM,
                 "AutoTokenizer": AutoTokenizer,
                 "BitsAndBytesConfig": BitsAndBytesConfig,
-                "GenerationConfig": GenerationConfig,
             }
         except ImportError as e:
             raise ImportError(

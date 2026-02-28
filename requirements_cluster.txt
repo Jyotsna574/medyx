@@ -1,18 +1,24 @@
-# Requirements for HPC Cluster (Param Shakti) - Local Models Only
+# Requirements for HPC Cluster (Param Shakti) - Local LLM + Vision
 # ================================================================
-# This file is for running with LOCAL HuggingFace models.
-# Does NOT include google-generativeai or streamlit to avoid protobuf conflicts.
+# For running run_mas_diagnosis.py with ACTIVE_PROVIDER=local
+# Does NOT include streamlit, google-generativeai (avoids protobuf conflicts)
 #
-# Install: pip install -r requirements_cluster.txt
+# Install order:
+#   1. pip install -r requirements_cluster.txt
+#   2. pip install torch --index-url https://download.pytorch.org/whl/cu121  (or cu118 for your GPU)
+#
+# ================================================================
+# REQUIRED - Core + LLM + Vision
+# ================================================================
 
-# Core
+# Core config
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
 PyYAML>=6.0.0
 loguru>=0.7.0
 
-# CAMEL-AI (base only, no rag extras to avoid protobuf>=6 requirement)
+# CAMEL-AI (base, no rag/graph-rag extras)
 camel-ai>=0.2.85
 
 # HuggingFace / Local Model Inference
@@ -22,14 +28,23 @@ bitsandbytes>=0.43.0
 sentencepiece>=0.2.0
 protobuf>=4.25.0,<6.0.0
 
-# PyTorch (install separately with CUDA support for your cluster)
-# pip install torch --index-url https://download.pytorch.org/whl/cu121
-# torch>=2.0.0
-
-# Vision (MedSAM-2)
+# Vision (MedSAM-2) - REQUIRED for run_mas_diagnosis
 numpy>=1.24.0
 Pillow>=10.0.0
 scikit-image>=0.22.0
 
-# Knowledge Graph (optional - comment out if not using Neo4j)
-neo4j>=5.0.0
+# ================================================================
+# OPTIONAL - Install only if using Neo4j Knowledge Graph
+# ================================================================
+# neo4j>=5.0.0
+#
+# Without neo4j: KG agent uses built-in fallback guidelines (AAO Glaucoma, etc.)
+# With neo4j: Set NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD in env
+
+# ================================================================
+# PyTorch - Install separately for your CUDA version
+# ================================================================
+# Example for CUDA 12.1:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Example for CUDA 11.8:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu118
