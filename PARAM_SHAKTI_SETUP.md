@@ -33,13 +33,82 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 # pip install torch --index-url https://download.pytorch.org/whl/cu118
 ```
 
-## 3. Neo4j (Required)
+## 3. Neo4j (Required – Cluster Setup)
 
 Neo4j is required. The pipeline does not use fallback guidelines.
 
-- Install: Ensure `neo4j>=5.0.0` is in `requirements_cluster.txt` (uncomment if needed).
-- Configure: Set `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD` in your environment or `.env`.
-- On cluster: Jobs run on GPU nodes; Neo4j usually runs on the login node. Use `NEO4J_URI=bolt://login01:7687` (or your login node hostname) so the job can reach Neo4j.
+**Architecture**: Jobs run on GPU nodes; Neo4j runs on the login node. The GPU job must connect to Neo4j on the login node.
+
+### 3a. Run Neo4j on the Login Node
+
+On Param Shakti (or your cluster), Neo4j must run on a node that GPU nodes can reach—typically the **login node**.
+
+```bash
+# SSH to cluster, stay on login node
+ssh user@login01    # use your cluster's login hostname
+
+# Option A: Neo4j Community via module/package (if available)
+module load neo4j    # if your cluster provides it
+neo4j start
+
+# Option B: Standalone Neo4j tarball
+# Download from neo4j.com, extract, run:
+# ./bin/neo4j start
+```
+
+Ensure Neo4j listens on the network (not just localhost): in `conf/neo4j.conf`, set:
+```properties
+server.default_listen_address=0.0.0.0
+```
+
+### 3b. Create .env on the Cluster
+
+In your project directory **on the cluster**, create `.env`:
+
+```bash
+cd ~/ddp/medyx   # or your project path
+
+cat > .env << 'EOF'
+# Replace login01 with your cluster's login node hostname
+NEO4J_URI=bolt://login01:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your_password
+EOF
+```
+
+**Important**: Use the login node **hostname** (e.g. `login01`, `login`, `frontend01`), not `127.0.0.1`. On a GPU node, `127.0.0.1` is the GPU node itself, which does not run Neo4j.
+
+### 3c. Load the Required Schema
+
+The retriever expects `Entity` nodes (`type`: disease, drug, gene/protein, effect/phenotype) and `RELATED` relationships. In Neo4j Browser (`http://<login-node>:7474`) or `cypher-shell`, run:
+
+```cypher
+CREATE (g:Entity {name: "Glaucoma", type: "disease", source: "ICD-10"});
+CREATE (p:Entity {name: "Pneumonia", type: "disease", source: "ICD-10"});
+CREATE (t1:Entity {name: "Timolol", type: "drug"});
+CREATE (a:Entity {name: "Amoxicillin", type: "drug"});
+MATCH (g:Entity {name: "Glaucoma"}), (t1:Entity {name: "Timolol"}) CREATE (g)-[:RELATED]->(t1);
+MATCH (p:Entity {name: "Pneumonia"}), (a:Entity {name: "Amoxicillin"}) CREATE (p)-[:RELATED]->(a);
+```
+
+(Add more entities as needed for your use case.)
+
+### 3d. Verify
+
+```bash
+# From login node
+python -c "
+from infrastructure.rag.neo4j_retriever import Neo4jKnowledgeRetriever
+import os
+os.environ.setdefault('NEO4J_URI', 'bolt://localhost:7687')  # if Neo4j on same node
+r = Neo4jKnowledgeRetriever()
+r.connect()
+print('Neo4j OK')
+r.close()
+"
+```
+
+When submitting via `sbatch`, the job loads `.env` automatically (see `run_job.sh`), so `NEO4J_URI` will point to the login node.
 
 ## 4. Download Model (One-Time)
 

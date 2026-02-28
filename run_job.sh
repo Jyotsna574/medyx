@@ -28,12 +28,15 @@ fi
 export ACTIVE_PROVIDER=local
 export LOCAL_MODEL_PATH="${HOME}/ddp/medyx/models/med42_8b"
 
-# Neo4j: Loaded from .env if present (neo4j:// or bolt://127.0.0.1:7687)
-# Note: On GPU node, 127.0.0.1 = this node. If Neo4j runs on login node,
-# set NEO4J_URI=bolt://login01:7687 (or similar) in .env
-export NEO4J_URI="${NEO4J_URI:-neo4j://127.0.0.1:7687}"
+# Neo4j: MUST be set in .env for cluster runs
+# Jobs run on GPU nodes; Neo4j runs on login node.
+# Set NEO4J_URI=bolt://login01:7687 (or your login hostname) in .env
 export NEO4J_USERNAME="${NEO4J_USERNAME:-neo4j}"
 export NEO4J_PASSWORD="${NEO4J_PASSWORD:-}"
+if [ -z "${NEO4J_URI}" ]; then
+    echo "ERROR: NEO4J_URI not set. Create .env with NEO4J_URI=bolt://<login-node>:7687"
+    exit 1
+fi
 
 echo "=============================================="
 echo "MAD MAS Diagnosis - Param Shakti"
