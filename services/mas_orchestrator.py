@@ -35,11 +35,12 @@ from infrastructure.vision.medsam2_engine import (
     MedSAM2VisionProvider,
     DomainConfig,
 )
-from infrastructure.rag.neo4j_retriever import (
-    Neo4jKnowledgeRetriever,
-    Neo4jConnectionError,
-    Neo4jQueryError,
-)
+# Neo4j disabled for testing - uncomment to enable
+# from infrastructure.rag.neo4j_retriever import (
+#     Neo4jKnowledgeRetriever,
+#     Neo4jConnectionError,
+#     Neo4jQueryError,
+# )
 from infrastructure.llm_factory import get_llm_backend, get_provider_info
 
 
@@ -507,8 +508,9 @@ class MASOrchestrator:
         logger.info("=" * 60)
         
         self.medsam_tool = MedSAMTool(checkpoint_path, low_memory_mode)
-        self.neo4j_tool = Neo4jTool()
-        
+        # Neo4j disabled for testing - uncomment to enable knowledge graph
+        # self.neo4j_tool = Neo4jTool()
+        self.neo4j_tool = None  # No Neo4j - vision + CAMEL agents only
         self._init_agents()
         
         logger.info("MAS Orchestrator initialized successfully")
@@ -777,10 +779,15 @@ Provide structured output using the required format.""",
     ) -> KnowledgeContext:
         """Run the Knowledge Graph Agent."""
         logger.info("[Agent: KGAgent] Querying knowledge graph...")
-        
-        knowledge_context = await self.neo4j_tool.query_medical_knowledge(
-            clinical_history, geometric_metrics
+        # Neo4j disabled - use placeholder; uncomment block below to restore
+        knowledge_context = KnowledgeContext(
+            guidelines="[Neo4j disabled - agents using clinical history and vision metrics only]",
+            sources=[],
         )
+        # if self.neo4j_tool:
+        #     knowledge_context = await self.neo4j_tool.query_medical_knowledge(
+        #         clinical_history, geometric_metrics
+        #     )
         
         message = BaseMessage.make_user_message(
             role_name="Case Coordinator",
@@ -1090,7 +1097,8 @@ Respond to the Specialist's concerns and revise your report if needed.""",
         """Clean up resources."""
         logger.info("Cleaning up MAS resources...")
         self.medsam_tool.unload()
-        self.neo4j_tool.close()
+        # if self.neo4j_tool:
+        #     self.neo4j_tool.close()
         logger.info("MAS cleanup complete")
 
 

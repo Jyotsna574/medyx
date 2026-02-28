@@ -23,7 +23,8 @@ from infrastructure.vision.medsam2_engine import (
     MedSAM2VisionProvider,
     DomainConfig,
 )
-from infrastructure.rag.neo4j_retriever import Neo4jKnowledgeRetriever
+# Neo4j disabled for testing - uncomment to enable
+# from infrastructure.rag.neo4j_retriever import Neo4jKnowledgeRetriever
 from services.squad import run_consultation, ConsultationResult
 
 # Load environment variables
@@ -89,13 +90,14 @@ class DiagnosisManager:
             self.vision_provider = VisionProvider(preload_model=preload_vision_model)
             print("  Engine: Placeholder (Development)")
 
-        # Initialize Knowledge Graph Retriever (required - no fallbacks)
-        print("Initializing Knowledge Graph...")
-        self.kg_retriever = Neo4jKnowledgeRetriever()
-        self.kg_retriever.connect()  # Raises Neo4jConnectionError on failure
-        print("Knowledge Graph: Connected")
-        self.kg_available = True
-        print("DiagnosisManager: Ready")
+        # Neo4j disabled for testing - uncomment to enable knowledge graph
+        # print("Initializing Knowledge Graph...")
+        # self.kg_retriever = Neo4jKnowledgeRetriever()
+        # self.kg_retriever.connect()  # Raises Neo4jConnectionError on failure
+        # print("Knowledge Graph: Connected")
+        self.kg_retriever = None
+        self.kg_available = False
+        print("DiagnosisManager: Ready (Neo4j disabled)")
 
     async def run_diagnosis(
         self,
@@ -128,8 +130,8 @@ class DiagnosisManager:
         # Create domain configuration based on case
         domain_config = self._create_domain_config(case)
         
-        # Step 1: Run Vision Analysis and KG Query in parallel
-        print("\n[Step 1] Analyzing image and retrieving guidelines...")
+        # Step 1: Run Vision Analysis (Neo4j disabled - no KG query)
+        print("\n[Step 1] Analyzing image...")
         print(f"  Modality: {case.modality}")
         print(f"  Target Region: {case.target_region}")
         
@@ -144,14 +146,16 @@ class DiagnosisManager:
         else:
             vision_task = self.vision_provider.analyze(case.image_path)
         
-        kg_query = f"Find symptoms, treatments, and clinical guidelines for: {case.history}"
-        kg_task = self.kg_retriever.search(kg_query)
-        
-        metrics, guidelines = await asyncio.gather(vision_task, kg_task)
+        # Neo4j disabled - use empty guidelines
+        # kg_query = f"Find symptoms, treatments, and clinical guidelines for: {case.history}"
+        # kg_task = self.kg_retriever.search(kg_query)
+        # metrics, guidelines = await asyncio.gather(vision_task, kg_task)
+        metrics = await vision_task
+        guidelines = "[Neo4j disabled - using vision metrics and clinical reasoning only]"
         
         print(f"  Vision Analysis: Risk Score = {metrics.risk_score:.1%}")
         print(f"  Extracted Geometry: {len(metrics.extracted_geometry)} measurements")
-        print(f"  Guidelines Retrieved: {len(guidelines)} characters")
+        print(f"  Guidelines: {len(guidelines)} chars (Neo4j disabled)")
         
         # Log key geometric metrics
         if metrics.extracted_geometry:

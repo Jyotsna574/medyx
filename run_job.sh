@@ -28,22 +28,20 @@ fi
 export ACTIVE_PROVIDER=local
 export LOCAL_MODEL_PATH="${HOME}/ddp/medyx/models/med42_8b"
 
-# Neo4j: MUST be set in .env for cluster runs
-# Jobs run on GPU nodes; Neo4j runs on login node.
-# Set NEO4J_URI=bolt://login01:7687 (or your login hostname) in .env
-export NEO4J_USERNAME="${NEO4J_USERNAME:-neo4j}"
-export NEO4J_PASSWORD="${NEO4J_PASSWORD:-}"
-if [ -z "${NEO4J_URI}" ]; then
-    echo "ERROR: NEO4J_URI not set. Create .env with NEO4J_URI=bolt://<login-node>:7687"
-    exit 1
-fi
+# Neo4j disabled for testing - uncomment below to require Neo4j
+# export NEO4J_USERNAME="${NEO4J_USERNAME:-neo4j}"
+# export NEO4J_PASSWORD="${NEO4J_PASSWORD:-}"
+# if [ -z "${NEO4J_URI}" ]; then
+#     echo "ERROR: NEO4J_URI not set. Create .env with NEO4J_URI=bolt://<login-node>:7687"
+#     exit 1
+# fi
 
 echo "=============================================="
 echo "MAD MAS Diagnosis - Param Shakti"
 echo "=============================================="
 echo "ACTIVE_PROVIDER=${ACTIVE_PROVIDER}"
 echo "LOCAL_MODEL_PATH=${LOCAL_MODEL_PATH}"
-echo "NEO4J_URI=${NEO4J_URI}"
+# echo "NEO4J_URI=${NEO4J_URI}"  # Neo4j disabled
 echo "=============================================="
 
 python run_mas_diagnosis.py
