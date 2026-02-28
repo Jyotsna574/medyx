@@ -33,10 +33,13 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 # pip install torch --index-url https://download.pytorch.org/whl/cu118
 ```
 
-## 3. Optional: Neo4j
+## 3. Neo4j (Required)
 
-- **Without Neo4j**: The pipeline runs with built-in fallback medical guidelines. No extra install.
-- **With Neo4j**: Uncomment `neo4j>=5.0.0` in `requirements_cluster.txt`, install it, and set `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD` in your environment or `.env`.
+Neo4j is required. The pipeline does not use fallback guidelines.
+
+- Install: Ensure `neo4j>=5.0.0` is in `requirements_cluster.txt` (uncomment if needed).
+- Configure: Set `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD` in your environment or `.env`.
+- On cluster: Jobs run on GPU nodes; Neo4j usually runs on the login node. Use `NEO4J_URI=bolt://login01:7687` (or your login node hostname) so the job can reach Neo4j.
 
 ## 4. Download Model (One-Time)
 
@@ -101,12 +104,12 @@ python run_mas_diagnosis.py
 | numpy         | Vision (MedSAM-2)                | Yes      |
 | Pillow        | Image loading                    | Yes      |
 | scikit-image  | Vision processing                | Yes      |
-| neo4j         | Knowledge graph (optional)       | No       |
+| neo4j         | Knowledge graph                 | Yes      |
 | streamlit     | Web UI (not used on cluster)     | No       |
 
 ## Troubleshooting
 
-- **`ModuleNotFoundError: neo4j`**: Normal if you did not install neo4j. The system uses fallback guidelines.
+- **`ModuleNotFoundError: neo4j`** or **`Neo4jConnectionError`**: Install neo4j (`pip install neo4j`) and ensure Neo4j is running. Set `NEO4J_URI` to the correct host (e.g. `bolt://login01:7687` for cluster).
 - **`ModuleNotFoundError: numpy`**: Run `pip install -r requirements_cluster.txt` again.
 - **CUDA out of memory**: Use 4-bit quantization (default) or a smaller model (med42_8b instead of 70B).
 - **Test image missing**: Ensure `test_chest_xray.png` exists in the working directory or pass a valid image path.

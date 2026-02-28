@@ -16,6 +16,8 @@ import sys
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from PIL import Image
+
 from core.schemas import PatientCase
 from services.manager import DiagnosisManager
 
@@ -77,11 +79,11 @@ async def run_example():
             low_memory_mode=True,
         )
     
-    # Define anatomical bounding box for chest X-ray
-    # This targets the central lung/mediastinum region
-    # Format: [x_min, y_min, x_max, y_max]
-    # We'll use a generous box covering most of the chest
-    anatomical_bbox = [100, 100, 900, 800]  # Adjust based on image size
+    # Compute anatomical bbox from image dimensions (center 80%, 10% margin each side)
+    with Image.open(image_path) as img:
+        w, h = img.size
+    margin_x, margin_y = int(w * 0.1), int(h * 0.1)
+    anatomical_bbox = [margin_x, margin_y, w - margin_x, h - margin_y]
     
     print("\n" + "-" * 70)
     print("Running Diagnosis...")

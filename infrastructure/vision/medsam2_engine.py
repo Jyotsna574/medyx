@@ -342,10 +342,13 @@ class MedSAM2VisionEngine(VisionBackend):
         mask_binary = (mask > 0).astype(np.uint8)
         pixel_area = int(np.sum(mask_binary))
         geometry["pixel_area"] = pixel_area
-        
+
         if pixel_area == 0:
-            geometry["warning"] = "Empty mask - no structure segmented"
-            return geometry
+            raise ValueError(
+                "Segmentation produced an empty mask. "
+                "Ensure the anatomical bbox is within image bounds and contains "
+                "the target structure. Use image dimensions (e.g. [0.1*w, 0.1*h, 0.9*w, 0.9*h])."
+            )
         
         # Convert to physical units if spacing is available
         if domain_config.pixel_spacing_mm is not None:
@@ -533,20 +536,27 @@ class MedSAM2VisionEngine(VisionBackend):
         prompt_data: Optional[Any],
         image_shape: tuple,
     ) -> Optional[SegmentationPrompt]:
-        """Prepare segmentation prompt from input."""
-        
+        """Prepare segmentation prompt from input. Clamps bbox to image bounds."""
+        h, w = image_shape[:2]
+
         if isinstance(prompt_type, str):
             prompt_type = PromptType(prompt_type)
-        
+
         if prompt_type == PromptType.AUTOMATIC:
             # Generate automatic center-region prompt
-            h, w = image_shape[:2]
-            # Use center bounding box covering 60% of image
             margin_x = int(w * 0.2)
             margin_y = int(h * 0.2)
             prompt_data = [margin_x, margin_y, w - margin_x, h - margin_y]
             prompt_type = PromptType.BOUNDING_BOX
-        
+        elif prompt_type == PromptType.BOUNDING_BOX and prompt_data is not None:
+            # Clamp bbox to image dimensions - prevents empty mask from out-of-bounds coords
+            x_min, y_min, x_max, y_max = prompt_data[:4]
+            x_min = max(0, min(int(x_min), w - 1))
+            y_min = max(0, min(int(y_min), h - 1))
+            x_max = max(x_min + 1, min(int(x_max), w))
+            y_max = max(y_min + 1, min(int(y_max), h))
+            prompt_data = [x_min, y_min, x_max, y_max]
+
         return SegmentationPrompt(
             prompt_type=prompt_type,
             data=prompt_data,
@@ -616,8 +626,8 @@ class MedSAM2VisionEngine(VisionBackend):
             return DomainConfig(
                 domain="thoracic",
                 modality="xray",
-                target_structure="lung",
-                compute_ratios=["aspect_ratio"],
+                target_structure="lung_region",
+                compute_ratios=["aspect_ratio", "circularity"],
             )
         elif any(x in path_lower for x in ["ct", "liver", "abdomen"]):
             return DomainConfig(

@@ -89,17 +89,12 @@ class DiagnosisManager:
             self.vision_provider = VisionProvider(preload_model=preload_vision_model)
             print("  Engine: Placeholder (Development)")
 
-        # Initialize Knowledge Graph Retriever
+        # Initialize Knowledge Graph Retriever (required - no fallbacks)
         print("Initializing Knowledge Graph...")
         self.kg_retriever = Neo4jKnowledgeRetriever()
-        
-        if self.kg_retriever.connect():
-            print("Knowledge Graph: Connected")
-            self.kg_available = True
-        else:
-            print("Knowledge Graph: Using fallback guidelines")
-            self.kg_available = False
-        
+        self.kg_retriever.connect()  # Raises Neo4jConnectionError on failure
+        print("Knowledge Graph: Connected")
+        self.kg_available = True
         print("DiagnosisManager: Ready")
 
     async def run_diagnosis(

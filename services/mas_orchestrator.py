@@ -35,7 +35,11 @@ from infrastructure.vision.medsam2_engine import (
     MedSAM2VisionProvider,
     DomainConfig,
 )
-from infrastructure.rag.neo4j_retriever import Neo4jKnowledgeRetriever
+from infrastructure.rag.neo4j_retriever import (
+    Neo4jKnowledgeRetriever,
+    Neo4jConnectionError,
+    Neo4jQueryError,
+)
 from infrastructure.llm_factory import get_llm_backend, get_provider_info
 
 
@@ -285,15 +289,13 @@ class Neo4jTool:
         self._connected = False
     
     def _ensure_retriever(self) -> Neo4jKnowledgeRetriever:
-        """Lazily initialize the Neo4j retriever."""
+        """Lazily initialize the Neo4j retriever. Raises Neo4jConnectionError if connect fails."""
         if self._retriever is None:
             logger.info("Initializing Neo4j Knowledge Retriever")
             self._retriever = Neo4jKnowledgeRetriever()
-            self._connected = self._retriever.connect()
-            if self._connected:
-                logger.info("Neo4j connection established")
-            else:
-                logger.warning("Neo4j connection failed, using fallback guidelines")
+            self._retriever.connect()  # Raises Neo4jConnectionError on failure
+            self._connected = True
+            logger.info("Neo4j connection established")
         return self._retriever
     
     async def query_medical_knowledge(
@@ -328,7 +330,7 @@ class Neo4jTool:
         
         context = KnowledgeContext(
             guidelines=guidelines,
-            sources=["Neo4j Medical KG", "AAO Guidelines"] if self._connected else ["Fallback Guidelines"],
+            sources=["Neo4j Medical KG"],
         )
         
         logger.info(f"Knowledge Context Retrieved: {len(context.sources)} sources")

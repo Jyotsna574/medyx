@@ -1,12 +1,24 @@
 """Neo4j Knowledge Graph Retriever for medical data.
 
-Neo4j driver is imported lazily - if neo4j package is not installed,
-connect() fails gracefully and fallback guidelines are used.
-This allows running on clusters (e.g. Param Shakti) without Neo4j.
+Neo4j connection is required. connect() and search() raise on failure -
+no fallback guidelines. Ensure Neo4j is running and NEO4J_URI points
+to the correct host (e.g. bolt://login01:7687 for cluster login nodes).
 """
 
 import os
 from typing import Optional
+
+
+class Neo4jConnectionError(Exception):
+    """Raised when Neo4j connection fails."""
+
+    pass
+
+
+class Neo4jQueryError(Exception):
+    """Raised when Neo4j query returns no results."""
+
+    pass
 
 
 class Neo4jKnowledgeRetriever:
@@ -40,25 +52,31 @@ class Neo4jKnowledgeRetriever:
         """Establish connection to Neo4j.
         
         Returns:
-            True if connection successful, False otherwise.
+            True if connection successful.
+            
+        Raises:
+            Neo4jConnectionError: If neo4j package is not installed or connection fails.
         """
         try:
             from neo4j import GraphDatabase
+        except ImportError as e:
+            raise Neo4jConnectionError(
+                "Neo4j package not installed. Install with: pip install neo4j"
+            ) from e
+
+        try:
             self._driver = GraphDatabase.driver(
-                self.uri, 
-                auth=(self.username, self.password)
+                self.uri,
+                auth=(self.username, self.password),
             )
             self._driver.verify_connectivity()
             self._connected = True
             return True
-        except ImportError:
-            print("Neo4j package not installed. Using fallback guidelines. Install with: pip install neo4j")
-            self._connected = False
-            return False
         except Exception as e:
-            print(f"Neo4j connection failed: {e}")
             self._connected = False
-            return False
+            raise Neo4jConnectionError(
+                f"Neo4j connection failed ({self.uri}): {e}"
+            ) from e
     
     def close(self):
         """Close the Neo4j connection."""
@@ -78,11 +96,14 @@ class Neo4jKnowledgeRetriever:
             
         Returns:
             Formatted string with relevant medical knowledge.
+            
+        Raises:
+            Neo4jConnectionError: If not connected and connect() fails.
+            Neo4jQueryError: If the query returns no results.
         """
         if not self._connected:
-            if not self.connect():
-                return self._get_fallback_guidelines()
-        
+            self.connect()
+
         # Extract keywords from query
         keywords = self._extract_keywords(query)
         
@@ -112,29 +133,33 @@ class Neo4jKnowledgeRetriever:
         
         if results:
             return "\n\n".join(results)
-        else:
-            return self._get_fallback_guidelines()
+
+        raise Neo4jQueryError(
+            "Neo4j query returned no results. "
+            "Ensure the knowledge graph contains entities matching the query. "
+            f"Query keywords: {keywords}"
+        )
     
     def _extract_keywords(self, query: str) -> list[str]:
-        """Extract medical keywords from the query."""
-        # Common medical terms to search for
+        """Extract medical keywords from the query for graph search."""
         medical_terms = [
+            # Ophthalmic
             "glaucoma", "eye", "optic", "retina", "vision", "intraocular",
             "pressure", "iop", "cdr", "cup", "disc", "nerve", "field",
-            "treatment", "drug", "symptom", "disease", "diagnosis"
+            # Thoracic / respiratory
+            "lung", "chest", "pneumonia", "tuberculosis", "covid", "respiratory",
+            "thorax", "heart", "cardiac", "xray", "x-ray",
+            # General
+            "treatment", "drug", "symptom", "disease", "diagnosis", "infection",
         ]
         
         query_lower = query.lower()
-        found_keywords = []
-        
-        for term in medical_terms:
-            if term in query_lower:
-                found_keywords.append(term)
-        
-        # Always include glaucoma for this application
-        if "glaucoma" not in found_keywords:
-            found_keywords.append("glaucoma")
-        
+        found_keywords = [t for t in medical_terms if t in query_lower]
+
+        # Always include at least one broad term so query can match
+        if not found_keywords:
+            found_keywords = ["disease", "diagnosis"]
+
         return found_keywords
     
     def _query_diseases(self, session, keywords: list[str]) -> str:
@@ -241,34 +266,3 @@ class Neo4jKnowledgeRetriever:
             output.append(f"• {p['phenotype']} (Source: {p['source']})")
         
         return "\n".join(output)
-    
-    def _get_fallback_guidelines(self) -> str:
-        """Return fallback clinical guidelines when KG is not available."""
-        return """
-AAO (American Academy of Ophthalmology) Glaucoma Guidelines:
-
-1. CUP-TO-DISC RATIO (CDR) ASSESSMENT:
-   - CDR < 0.5: Generally considered normal
-   - CDR 0.5-0.6: Borderline, requires monitoring
-   - CDR > 0.6: Suspicious for glaucoma, further evaluation recommended
-   - CDR > 0.7: High suspicion for glaucomatous damage
-
-2. RISK FACTORS TO CONSIDER:
-   - Family history of glaucoma
-   - Age > 40 years
-   - African or Hispanic ancestry
-   - Elevated intraocular pressure (IOP)
-   - Thin central corneal thickness
-   - Myopia (nearsightedness)
-
-3. DIAGNOSTIC CRITERIA:
-   - Characteristic optic nerve damage (increased CDR, rim thinning)
-   - Corresponding visual field defects
-   - Open anterior chamber angle (for POAG)
-   - Exclusion of secondary causes
-
-4. MANAGEMENT RECOMMENDATIONS:
-   - Mild (CDR 0.5-0.6): Monitor every 6-12 months
-   - Moderate (CDR 0.6-0.7): Consider treatment, monitor every 3-6 months
-   - Severe (CDR > 0.7): Immediate treatment initiation recommended
-"""

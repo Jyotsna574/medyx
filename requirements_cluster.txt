@@ -26,7 +26,7 @@ transformers>=4.40.0
 accelerate>=0.30.0
 bitsandbytes>=0.43.0
 sentencepiece>=0.2.0
-protobuf>=4.25.0,<6.0.0
+protobuf>=4.25.0
 
 # Vision (MedSAM-2) - REQUIRED for run_mas_diagnosis
 numpy>=1.24.0
@@ -34,12 +34,10 @@ Pillow>=10.0.0
 scikit-image>=0.22.0
 
 # ================================================================
-# OPTIONAL - Install only if using Neo4j Knowledge Graph
+# REQUIRED - Neo4j Knowledge Graph (no fallbacks)
 # ================================================================
-# neo4j>=5.0.0
-#
-# Without neo4j: KG agent uses built-in fallback guidelines (AAO Glaucoma, etc.)
-# With neo4j: Set NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD in env
+neo4j>=5.0.0
+# Set NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD in env
 
 # ================================================================
 # PyTorch - Install separately for your CUDA version

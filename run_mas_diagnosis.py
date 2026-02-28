@@ -16,6 +16,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from PIL import Image
+
 from core.schemas import PatientCase
 from services.mas_orchestrator import MASOrchestrator, run_mas_diagnosis
 
@@ -65,8 +67,12 @@ async def run_example():
     print(f"Age/Sex: {case.patient_age}yo {case.patient_sex}")
     print(f"Modality: {case.modality} - {case.target_region}")
     print("\n" + "-" * 70)
-    
-    anatomical_bbox = [100, 100, 900, 800]
+
+    # Compute anatomical bbox from image dimensions (center 80%, 10% margin each side)
+    with Image.open(image_path) as img:
+        w, h = img.size
+    margin_x, margin_y = int(w * 0.1), int(h * 0.1)
+    anatomical_bbox = [margin_x, margin_y, w - margin_x, h - margin_y]
     
     orchestrator = MASOrchestrator(
         checkpoint_path="./checkpoints",
