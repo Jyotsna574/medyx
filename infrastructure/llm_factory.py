@@ -559,28 +559,20 @@ class HuggingFaceModelBackend(BaseModelBackend):
     
     def _make_chat_completion(self, response: ChatCompletionResponse) -> Any:
         """Convert our response to OpenAI ChatCompletion format that CAMEL expects."""
-        from types import SimpleNamespace
-        
-        message = SimpleNamespace(
-            role="assistant",
-            content=response.content,
-            function_call=None,
-            tool_calls=None,
-        )
-        
-        choice = SimpleNamespace(
-            index=0,
-            message=message,
-            finish_reason=response.finish_reason,
-        )
-        
-        usage = SimpleNamespace(
+        from openai.types.chat.chat_completion import ChatCompletion, Choice
+        from openai.types.chat.chat_completion_message import ChatCompletionMessage
+        from openai.types.completion_usage import CompletionUsage
+
+        valid_reasons = ("stop", "length", "tool_calls", "content_filter", "function_call")
+        finish_reason = response.finish_reason if response.finish_reason in valid_reasons else "stop"
+        message = ChatCompletionMessage(role="assistant", content=response.content)
+        choice = Choice(index=0, message=message, finish_reason=finish_reason)
+        usage = CompletionUsage(
             prompt_tokens=response.usage.get("prompt_tokens", 0),
             completion_tokens=response.usage.get("completion_tokens", 0),
             total_tokens=response.usage.get("total_tokens", 0),
         )
-        
-        completion = SimpleNamespace(
+        return ChatCompletion(
             id="hf-local-completion",
             object="chat.completion",
             created=0,
@@ -588,8 +580,6 @@ class HuggingFaceModelBackend(BaseModelBackend):
             choices=[choice],
             usage=usage,
         )
-        
-        return completion
     
     def _run(self, messages: List[Any], *args, **kwargs) -> Any:
         """
