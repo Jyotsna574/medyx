@@ -122,9 +122,11 @@ class HuggingFaceTokenCounter:
         Returns:
             Total token count.
         """
-        if self._tokenizer is None:
+        if messages is None:
             return 0
-        
+        if self._tokenizer is None:
+            return len(messages) * 4
+
         total_tokens = 0
         for msg in messages:
             content = ""
@@ -262,20 +264,21 @@ class HuggingFaceLocalBackend:
             if self._tokenizer.pad_token is None:
                 self._tokenizer.pad_token = self._tokenizer.eos_token
             
-            # Load model
+            # Load model (first positional arg = model path; kwargs for options)
             print("  Loading model weights...")
-            model_kwargs = {
-                "pretrained_model_name_or_path": self.model_path_or_id,
+            load_kwargs = {
                 "device_map": self.device_map,
                 "trust_remote_code": True,
             }
-            
             if quantization_config:
-                model_kwargs["quantization_config"] = quantization_config
+                load_kwargs["quantization_config"] = quantization_config
             else:
-                model_kwargs["torch_dtype"] = self._get_torch_dtype(self.torch_dtype_str)
-            
-            self._model = tf["AutoModelForCausalLM"].from_pretrained(**model_kwargs)
+                load_kwargs["torch_dtype"] = self._get_torch_dtype(self.torch_dtype_str)
+
+            self._model = tf["AutoModelForCausalLM"].from_pretrained(
+                self.model_path_or_id,
+                **load_kwargs,
+            )
             
             self._loaded = True
             
@@ -411,17 +414,19 @@ class HuggingFaceLocalBackend:
     def unload(self) -> None:
         """Unload the model and free GPU memory."""
         torch = _lazy_import_torch()
-        
-        del self._model
-        del self._tokenizer
+
+        if self._model is not None:
+            del self._model
+        if self._tokenizer is not None:
+            del self._tokenizer
         self._model = None
         self._tokenizer = None
         self._loaded = False
-        
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-            gc.collect()
-        
+        gc.collect()
+
         print("[HuggingFaceLocalBackend] Model unloaded")
     
     def get_info(self) -> Dict[str, Any]:
@@ -588,27 +593,28 @@ class HuggingFaceModelBackend(BaseModelBackend):
         
         return completion
     
-    def _run(self, messages: List[Any]) -> Any:
+    def _run(self, messages: List[Any], *args, **kwargs) -> Any:
         """
         Required abstract method from BaseModelBackend.
         Synchronous inference method called by CAMEL-AI.
+        response_format and tools (from *args/**kwargs) are ignored for local models.
         """
         normalized_messages = self._normalize_messages(messages)
         response = self._hf_backend.run(normalized_messages)
         return self._make_chat_completion(response)
     
-    async def _arun(self, messages: List[Any]) -> Any:
+    async def _arun(self, messages: List[Any], *args, **kwargs) -> Any:
         """
         Required abstract method from BaseModelBackend.
         Async inference method - runs sync version in executor for compatibility.
         """
         import asyncio
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._run, messages)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: self._run(messages, *args, **kwargs))
     
-    def run(self, messages: List[Any]) -> Any:
-        """Public run method that delegates to _run."""
-        return self._run(messages)
+    def run(self, messages: List[Any], *args, **kwargs) -> Any:
+        """Public run method that delegates to _run. Accepts response_format, tools from CAMEL."""
+        return self._run(messages, *args, **kwargs)
     
     def check_model_config(self) -> None:
         """Check if model configuration is valid."""
@@ -621,9 +627,11 @@ class HuggingFaceModelBackend(BaseModelBackend):
     
     @property 
     def token_counter(self) -> Any:
-        """Return token counter for CAMEL-AI memory management."""
+        """Return token counter for CAMEL-AI memory management. Never returns None."""
         if self._hf_token_counter is None:
             self._ensure_tokenizer_loaded()
+        if self._hf_token_counter is None:
+            self._hf_token_counter = HuggingFaceTokenCounter(None)
         return self._hf_token_counter
     
     def unload(self) -> None:
