@@ -282,67 +282,51 @@ class MedSAMTool:
             logger.info("MedSAM-2 model unloaded")
 
 
-class Neo4jTool:
-    """Custom tool for querying Neo4j knowledge graph."""
-    
-    def __init__(self):
-        self._retriever: Optional[Neo4jKnowledgeRetriever] = None
-        self._connected = False
-    
-    def _ensure_retriever(self) -> Neo4jKnowledgeRetriever:
-        """Lazily initialize the Neo4j retriever. Raises Neo4jConnectionError if connect fails."""
-        if self._retriever is None:
-            logger.info("Initializing Neo4j Knowledge Retriever")
-            self._retriever = Neo4jKnowledgeRetriever()
-            self._retriever.connect()  # Raises Neo4jConnectionError on failure
-            self._connected = True
-            logger.info("Neo4j connection established")
-        return self._retriever
-    
-    async def query_medical_knowledge(
-        self,
-        clinical_history: ClinicalHistory,
-        geometric_metrics: GeometricMetrics,
-    ) -> KnowledgeContext:
-        """
-        Query the knowledge graph for relevant medical context.
-        
-        Args:
-            clinical_history: Parsed clinical history.
-            geometric_metrics: Vision analysis metrics.
-            
-        Returns:
-            KnowledgeContext with guidelines and differential diagnoses.
-        """
-        retriever = self._ensure_retriever()
-        
-        query_parts = [
-            clinical_history.chief_complaint,
-            " ".join(clinical_history.comorbidities),
-            " ".join(clinical_history.risk_factors),
-        ]
-        query = " ".join(query_parts)
-        
-        logger.info(f"Querying knowledge graph: '{query[:100]}...'")
-        
-        guidelines = await retriever.search(query)
-        
-        logger.debug(f"Retrieved {len(guidelines)} characters of guidelines")
-        
-        context = KnowledgeContext(
-            guidelines=guidelines,
-            sources=["Neo4j Medical KG"],
-        )
-        
-        logger.info(f"Knowledge Context Retrieved: {len(context.sources)} sources")
-        
-        return context
-    
-    def close(self):
-        """Close the Neo4j connection."""
-        if self._retriever:
-            self._retriever.close()
-            logger.info("Neo4j connection closed")
+# Neo4j disabled - entire class commented out. Uncomment to enable.
+# class Neo4jTool:
+#     """Custom tool for querying Neo4j knowledge graph."""
+#
+#     def __init__(self):
+#         self._retriever: Optional[Neo4jKnowledgeRetriever] = None
+#         self._connected = False
+#
+#     def _ensure_retriever(self) -> Neo4jKnowledgeRetriever:
+#         """Lazily initialize the Neo4j retriever. Raises Neo4jConnectionError if connect fails."""
+#         if self._retriever is None:
+#             logger.info("Initializing Neo4j Knowledge Retriever")
+#             self._retriever = Neo4jKnowledgeRetriever()
+#             self._retriever.connect()  # Raises Neo4jConnectionError on failure
+#             self._connected = True
+#             logger.info("Neo4j connection established")
+#         return self._retriever
+#
+#     async def query_medical_knowledge(
+#         self,
+#         clinical_history: ClinicalHistory,
+#         geometric_metrics: GeometricMetrics,
+#     ) -> KnowledgeContext:
+#         retriever = self._ensure_retriever()
+#         query_parts = [
+#             clinical_history.chief_complaint,
+#             " ".join(clinical_history.comorbidities),
+#             " ".join(clinical_history.risk_factors),
+#         ]
+#         query = " ".join(query_parts)
+#         logger.info(f"Querying knowledge graph: '{query[:100]}...'")
+#         guidelines = await retriever.search(query)
+#         logger.debug(f"Retrieved {len(guidelines)} characters of guidelines")
+#         context = KnowledgeContext(
+#             guidelines=guidelines,
+#             sources=["Neo4j Medical KG"],
+#         )
+#         logger.info(f"Knowledge Context Retrieved: {len(context.sources)} sources")
+#         return context
+#
+#     def close(self):
+#         """Close the Neo4j connection."""
+#         if self._retriever:
+#             self._retriever.close()
+#             logger.info("Neo4j connection closed")
 
 
 # =============================================================================
