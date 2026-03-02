@@ -13,6 +13,9 @@ venv/
 env/
 .env
 
+# Cluster-specific job script (use run_job.example.sh as template)
+run_job.sh
+
 *.log
 
 __pycache__/

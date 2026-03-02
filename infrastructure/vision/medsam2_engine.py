@@ -13,6 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from loguru import logger
 import numpy as np
 from PIL import Image
 
@@ -148,11 +149,7 @@ class MedSAM2VisionEngine(VisionBackend):
         self._loaded = False
         self._current_image_set = False
         
-        print(f"[MedSAM2VisionEngine] Initialized")
-        print(f"  Model: {model_variant}")
-        print(f"  Device: {self.device}")
-        print(f"  FP16: {use_float16}")
-        print(f"  Low Memory Mode: {low_memory_mode}")
+        logger.info(f"[MedSAM2VisionEngine] Initialized | Model: {model_variant} | Device: {self.device} | FP16: {use_float16} | Low Memory: {low_memory_mode}")
     
     def load(self) -> bool:
         """
@@ -168,8 +165,7 @@ class MedSAM2VisionEngine(VisionBackend):
         _sam2 = _lazy_import_sam2()
         
         if _sam2 is None:
-            print("[MedSAM2VisionEngine] SAM-2 package not installed")
-            print("  Install with: pip install segment-anything-2")
+            logger.error("[MedSAM2VisionEngine] SAM-2 package not installed. Install with: pip install segment-anything-2")
             return False
         
         try:
@@ -180,15 +176,15 @@ class MedSAM2VisionEngine(VisionBackend):
             else:
                 model_cfg = self.MODEL_CONFIGS.get(self.model_variant)
                 if not model_cfg:
-                    print(f"[MedSAM2VisionEngine] Unknown model variant: {self.model_variant}")
+                    logger.error(f"[MedSAM2VisionEngine] Unknown model variant: {self.model_variant}")
                     return False
                 checkpoint_file = checkpoint_dir / model_cfg["checkpoint"]
             
             if not checkpoint_file.exists():
-                print(f"[MedSAM2VisionEngine] Checkpoint not found: {checkpoint_file}")
+                logger.error(f"[MedSAM2VisionEngine] Checkpoint not found: {checkpoint_file}")
                 return False
             
-            print(f"[MedSAM2VisionEngine] Loading checkpoint: {checkpoint_file}")
+            logger.info(f"[MedSAM2VisionEngine] Loading checkpoint: {checkpoint_file}")
             
             # Build SAM-2 model
             model_cfg = self.MODEL_CONFIGS.get(self.model_variant, {})
@@ -213,19 +209,17 @@ class MedSAM2VisionEngine(VisionBackend):
             self._predictor = _sam2["SAM2ImagePredictor"](self._model)
             
             self._loaded = True
-            print(f"[MedSAM2VisionEngine] Model loaded successfully")
+            logger.info(f"[MedSAM2VisionEngine] Model loaded successfully")
             
             # Report memory usage
             if self.device == "cuda":
                 allocated = _torch.cuda.memory_allocated() / 1024**3
-                print(f"  GPU Memory Used: {allocated:.2f} GB")
+                logger.debug(f"  GPU Memory Used: {allocated:.2f} GB")
             
             return True
             
         except Exception as e:
-            print(f"[MedSAM2VisionEngine] Failed to load model: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"[MedSAM2VisionEngine] Failed to load model: {e}")
             return False
     
     def analyze(
@@ -309,9 +303,7 @@ class MedSAM2VisionEngine(VisionBackend):
             )
             
         except Exception as e:
-            print(f"[MedSAM2VisionEngine] Analysis error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"[MedSAM2VisionEngine] Analysis error: {e}")
             return VisionAnalysisResult(
                 error=str(e),
                 model_id=self.model_variant,
@@ -752,7 +744,7 @@ class MedSAM2VisionEngine(VisionBackend):
             _torch.cuda.empty_cache()
             gc.collect()
         
-        print("[MedSAM2VisionEngine] Model unloaded")
+        logger.info("[MedSAM2VisionEngine] Model unloaded")
     
     def get_info(self) -> dict:
         """Get information about this backend."""

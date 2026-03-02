@@ -32,6 +32,8 @@ protobuf>=4.25.0
 numpy>=1.24.0
 Pillow>=10.0.0
 scikit-image>=0.22.0
+segment-anything-2>=0.1.0
+opencv-python-headless>=4.0.0
 
 # ================================================================
 # REQUIRED - Neo4j Knowledge Graph (no fallbacks)

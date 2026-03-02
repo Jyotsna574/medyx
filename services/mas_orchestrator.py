@@ -248,6 +248,12 @@ class MedSAMTool:
             domain_config=domain_config,
         )
         
+        # Check for analysis errors
+        if not result.extracted_geometry and any("Analysis Error" in f for f in result.findings):
+            logger.error(f"[VisionAnalysisAgent] Vision Analysis FAILED: {result.findings}")
+        elif not result.extracted_geometry:
+            logger.warning("[VisionAnalysisAgent] Vision Analysis returned NO geometry (possible empty mask)")
+        
         logger.debug(f"Vision analysis complete: {len(result.extracted_geometry)} metrics")
         
         geometry = result.extracted_geometry
