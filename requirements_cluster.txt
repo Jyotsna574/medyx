@@ -1,50 +1,47 @@
 # Requirements for HPC Cluster (Param Shakti) - Local LLM + Vision
 # ================================================================
 # For running run_mas_diagnosis.py with ACTIVE_PROVIDER=local
-# Does NOT include streamlit, google-generativeai (avoids protobuf conflicts)
 #
-# Install order:
-#   1. pip install -r requirements_cluster.txt
-#   2. pip install torch --index-url https://download.pytorch.org/whl/cu121  (or cu118 for your GPU)
+# INSTALL ORDER (CRITICAL):
+#   1. Create conda env with Python 3.10 (NOT 3.12):
+#      conda create -n medsam2 python=3.10 -y && conda activate medsam2
 #
-# ================================================================
-# REQUIRED - Core + LLM + Vision
+#   2. Install PyTorch FIRST (match your CUDA version):
+#      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+#   3. Install SAM-2 from GitHub (NOT PyPI - it doesn't exist there!):
+#      pip install git+https://github.com/facebookresearch/segment-anything-2.git
+#
+#   4. Install remaining dependencies:
+#      pip install -r requirements_cluster.txt
+#
 # ================================================================
 
-# Core config
+# Core
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
 PyYAML>=6.0.0
 loguru>=0.7.0
 
-# CAMEL-AI (base, no rag/graph-rag extras)
+# CAMEL-AI framework
 camel-ai>=0.2.85
 
-# HuggingFace / Local Model Inference
+# HuggingFace / Local LLM
 transformers>=4.40.0
 accelerate>=0.30.0
 bitsandbytes>=0.43.0
 sentencepiece>=0.2.0
 protobuf>=4.25.0
 
-# Vision (MedSAM-2) - REQUIRED for run_mas_diagnosis
+# Vision (MedSAM-2 dependencies - SAM-2 itself from GitHub)
 numpy>=1.24.0
 Pillow>=10.0.0
 scikit-image>=0.22.0
-segment-anything-2>=0.1.0
 opencv-python-headless>=4.0.0
+scipy>=1.10.0
+einops>=0.7.0
+tqdm>=4.65.0
 
-# ================================================================
-# REQUIRED - Neo4j Knowledge Graph (no fallbacks)
-# ================================================================
+# Neo4j (optional - set NEO4J_URI in .env)
 neo4j>=5.0.0
-# Set NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD in env
-
-# ================================================================
-# PyTorch - Install separately for your CUDA version
-# ================================================================
-# Example for CUDA 12.1:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
-# Example for CUDA 11.8:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu118

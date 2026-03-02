@@ -42,7 +42,9 @@ def _lazy_import_sam2():
             from sam2.build_sam import build_sam2
             from sam2.sam2_image_predictor import SAM2ImagePredictor
             sam2 = {"build_sam2": build_sam2, "SAM2ImagePredictor": SAM2ImagePredictor}
-        except ImportError:
+        except ImportError as e:
+            logger.error(f"[MedSAM2] SAM-2 import FAILED: {e}")
+            logger.error("[MedSAM2] Install SAM-2 from GitHub: pip install git+https://github.com/facebookresearch/segment-anything-2.git")
             sam2 = None
     return sam2
 
@@ -831,6 +833,7 @@ class MedSAM2VisionProvider:
     ) -> VisionMetrics:
         """Convert engine result to VisionMetrics."""
         if result.error:
+            logger.error(f"[MedSAM2] Vision analysis FAILED: {result.error}")
             return VisionMetrics(
                 risk_score=0.0,
                 findings=[f"Analysis Error: {result.error}"],

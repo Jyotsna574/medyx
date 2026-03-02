@@ -656,10 +656,7 @@ Provide structured output using the required format.""",
         response = self.clinical_history_agent.step(message)
         parsed = self._parse_clinical_history(response.msg.content, case)
         
-        logger.info(f"[ClinicalHistoryAgent] Parsed Output:")
-        logger.info(f"  Chief Complaint: {parsed.chief_complaint}")
-        logger.info(f"  Comorbidities: {parsed.comorbidities}")
-        logger.info(f"  Risk Factors: {parsed.risk_factors}")
+        logger.info(f"[ClinicalHistoryAgent] Chief: {parsed.chief_complaint[:80]}...")
         
         return parsed
     
@@ -722,16 +719,12 @@ Provide structured output using the required format.""",
             domain_config=domain_config,
         )
         
-        logger.info(f"[VisionAnalysisAgent] Geometric Metrics:")
-        logger.info(f"  Pixel Area: {metrics.pixel_area:,}")
-        logger.info(f"  Circularity: {metrics.circularity:.4f}")
-        logger.info(f"  Eccentricity: {metrics.eccentricity:.4f}")
-        logger.info(f"  Solidity: {metrics.solidity:.4f}")
-        logger.info(f"  Components: {metrics.num_components}")
-        logger.info(f"  Confidence: {metrics.confidence_score:.1%}")
-        
-        if metrics.additional_metrics:
-            logger.info(f"  Additional Metrics: {metrics.additional_metrics}")
+        # Log metrics - warn if all zeros (indicates failed segmentation)
+        if metrics.pixel_area == 0:
+            logger.error(f"[VisionAnalysisAgent] FAILED - pixel_area=0, confidence={metrics.confidence_score:.1%}")
+            logger.error("[VisionAnalysisAgent] Check: SAM-2 installed? Checkpoint exists? Image valid?")
+        else:
+            logger.info(f"[VisionAnalysisAgent] OK - area={metrics.pixel_area:,}px, circ={metrics.circularity:.3f}, conf={metrics.confidence_score:.1%}")
         
         return metrics
     
