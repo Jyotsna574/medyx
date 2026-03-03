@@ -248,11 +248,13 @@ class HuggingFaceLocalBackend:
                 )
                 print(f"  BitsAndBytes Config: 4-bit, {self.bnb_4bit_quant_type}, double_quant={self.use_double_quant}")
             
-            # Load tokenizer
+            # Load tokenizer (use local_files_only if path looks like a local directory)
             print("  Loading tokenizer...")
+            is_local_path = os.path.isdir(self.model_path_or_id) or self.model_path_or_id.startswith("/")
             self._tokenizer = tf["AutoTokenizer"].from_pretrained(
                 self.model_path_or_id,
                 trust_remote_code=True,
+                local_files_only=is_local_path,
             )
             
             # Ensure pad token is set
@@ -264,6 +266,7 @@ class HuggingFaceLocalBackend:
             load_kwargs = {
                 "device_map": self.device_map,
                 "trust_remote_code": True,
+                "local_files_only": is_local_path,
             }
             if quantization_config:
                 load_kwargs["quantization_config"] = quantization_config

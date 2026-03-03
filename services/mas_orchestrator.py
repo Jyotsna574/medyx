@@ -214,7 +214,11 @@ class MedSAMTool:
         checkpoint_path: str | None = None,
         low_memory_mode: bool = True,
     ):
-        self.checkpoint_path = checkpoint_path or os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints")
+        # Use MEDSAM_CHECKPOINT_PATH (full path to .pth file) first, then fallback to dir-based
+        self.checkpoint_path = checkpoint_path or os.environ.get(
+            "MEDSAM_CHECKPOINT_PATH",
+            os.environ.get("MEDSAM_CHECKPOINT_DIR", "./checkpoints")
+        )
         self.low_memory_mode = low_memory_mode
         self._provider: Optional[MedSAM2VisionProvider] = None
     
