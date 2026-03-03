@@ -8,19 +8,17 @@ multi-agent diagnostic reasoning.
 Based on: https://github.com/bowang-lab/MedSAM
 Paper: "Segment Anything in Medical Images" (Nature Communications 2024)
 
-Environment:
-    MEDSAM_CHECKPOINT_DIR: Directory for checkpoints (default: ./checkpoints).
-                           Use a persistent path (e.g. /scratch/user/models) on clusters.
+Environment (set these in your SLURM script):
+    MEDSAM_CHECKPOINT_PATH: Full path to checkpoint .pth file (required on cluster)
+                            e.g. /scratch/ed21b031/models/medsam_checkpoints/sam_vit_b_01ec64.pth
+    MEDSAM_ROOT: Path to MedSAM repo (where segment_anything module lives)
+                 e.g. /home/ddp/medyx/MedSAM
 
-Installation:
-    1. git clone https://github.com/bowang-lab/MedSAM
-    2. cd MedSAM && pip install -e .
-    3. Download medsam_vit_b.pth checkpoint
+No auto-download - checkpoints must be pre-downloaded for offline cluster use.
 """
 
 import gc
 import os
-import urllib.request
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -32,10 +30,6 @@ from PIL import Image
 
 from core.schemas import VisionMetrics
 from infrastructure.vision.vision_provider import VisionBackend, VisionAnalysisResult
-
-# MedSAM checkpoint download URL (from official release)
-# ~380MB ViT-B checkpoint fine-tuned on medical images
-MEDSAM_CHECKPOINT_URL = "https://huggingface.co/wanglab/medsam-vit-b/resolve/main/medsam_vit_b.pth"
 
 # Lazy imports for PyTorch and MedSAM to avoid loading CUDA until needed
 torch = None
@@ -51,41 +45,30 @@ def _lazy_import_torch():
     return torch
 
 
-def _get_checkpoint_dir() -> str:
-    """Resolve checkpoint directory from MEDSAM_CHECKPOINT_DIR env or default."""
-    return os.environ.get("MEDSAM_CHECKPOINT_DIR", 
-                          os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints"))
-
-
-def _download_checkpoint_if_needed(checkpoint_file: Path) -> bool:
+def _get_checkpoint_path() -> str:
     """
-    Download MedSAM checkpoint if it does not exist locally.
-    Returns True if checkpoint is available (existing or newly downloaded).
+    Resolve checkpoint path from environment.
+    
+    Priority:
+    1. MEDSAM_CHECKPOINT_PATH - full path to .pth file
+    2. MEDSAM_CHECKPOINT_DIR + sam_vit_b_01ec64.pth
+    3. ./checkpoints/sam_vit_b_01ec64.pth (fallback)
     """
-    if checkpoint_file.exists():
-        logger.info(f"[MedSAM] Checkpoint found, skipping download: {checkpoint_file}")
-        return True
-
-    checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("[MedSAM] Downloading checkpoint for the first time...")
-    logger.info(f"[MedSAM] URL: {MEDSAM_CHECKPOINT_URL}")
-    logger.info(f"[MedSAM] Target: {checkpoint_file} (~380MB)")
-
-    try:
-        urllib.request.urlretrieve(MEDSAM_CHECKPOINT_URL, checkpoint_file)
-        logger.info("[MedSAM] Download complete.")
-        return True
-    except Exception as e:
-        logger.exception(f"[MedSAM] Download failed: {e}")
-        logger.info("[MedSAM] Manual download: https://github.com/bowang-lab/MedSAM#get-started")
-        return False
+    # Direct path to checkpoint file (preferred for cluster)
+    ckpt_path = os.environ.get("MEDSAM_CHECKPOINT_PATH")
+    if ckpt_path:
+        return ckpt_path
+    
+    # Directory-based (legacy)
+    ckpt_dir = os.environ.get("MEDSAM_CHECKPOINT_DIR", "./checkpoints")
+    return os.path.join(ckpt_dir, "sam_vit_b_01ec64.pth")
 
 
 def _lazy_import_medsam():
     """Lazily import MedSAM/segment_anything modules."""
     global segment_anything
     if segment_anything is None:
-        # Allow pointing to a custom MedSAM install dir on HPC clusters
+        # Add MedSAM repo to path if specified
         medsam_root = os.environ.get("MEDSAM_ROOT")
         if medsam_root:
             import sys
@@ -99,14 +82,15 @@ def _lazy_import_medsam():
                 "sam_model_registry": sam_model_registry,
                 "SamPredictor": SamPredictor,
             }
+            logger.info("[MedSAM] segment_anything loaded successfully")
         except ImportError as e:
             missing = str(e).replace("No module named ", "").strip("'")
-            logger.error(f"[MedSAM] Import FAILED - missing package: {missing}")
+            logger.error(f"[MedSAM] Import FAILED - missing: {missing}")
             if "torchvision" in str(e):
-                logger.error("[MedSAM] Fix: pip install torchvision --index-url https://download.pytorch.org/whl/cu121")
+                logger.error("[MedSAM] Fix: pip install torchvision")
             elif "segment_anything" in str(e):
-                logger.error("[MedSAM] Fix: git clone https://github.com/bowang-lab/MedSAM && cd MedSAM && pip install -e .")
-                logger.error("[MedSAM]      Or set MEDSAM_ROOT=/scratch/ed21b031/medsam2 to point to your install.")
+                logger.error("[MedSAM] Fix: Set MEDSAM_ROOT to your MedSAM repo path")
+                logger.error("[MedSAM]      e.g. export MEDSAM_ROOT=/home/ddp/medyx/MedSAM")
             segment_anything = None
     return segment_anything
 
@@ -161,12 +145,8 @@ class MedSAMVisionEngine(VisionBackend):
         https://github.com/bowang-lab/MedSAM
     """
     
-    # MedSAM model configuration (ViT-B based)
-    MODEL_CONFIG = {
-        "model_type": "vit_b",
-        "checkpoint": "medsam_vit_b.pth",
-        "image_size": 1024,
-    }
+    # SAM ViT-B model type (works with both SAM and MedSAM checkpoints)
+    MODEL_TYPE = "vit_b"
     
     def __init__(
         self,
@@ -179,13 +159,13 @@ class MedSAMVisionEngine(VisionBackend):
         Initialize the MedSAM Vision Engine.
         
         Args:
-            checkpoint_path: Path to the checkpoint directory or file. Defaults to
-                            MEDSAM_CHECKPOINT_DIR env or ./checkpoints/
+            checkpoint_path: Full path to checkpoint .pth file. Defaults to
+                            MEDSAM_CHECKPOINT_PATH env var.
             device: Device to run inference on ('cuda', 'cpu', or None for auto).
             use_float16: Use FP16 for reduced memory on GPU.
             low_memory_mode: Enable aggressive memory optimization for limited VRAM.
         """
-        self.checkpoint_path = checkpoint_path or _get_checkpoint_dir()
+        self.checkpoint_path = checkpoint_path or _get_checkpoint_path()
         self.use_float16 = use_float16
         self.low_memory_mode = low_memory_mode
         
@@ -217,21 +197,18 @@ class MedSAMVisionEngine(VisionBackend):
         _medsam = _lazy_import_medsam()
         
         if _medsam is None:
-            logger.error("[MedSAMVisionEngine] MedSAM package not installed.")
-            logger.error("[MedSAMVisionEngine] Install: git clone https://github.com/bowang-lab/MedSAM && cd MedSAM && pip install -e .")
+            logger.error("[MedSAMVisionEngine] segment_anything not available.")
+            logger.error("[MedSAMVisionEngine] Set MEDSAM_ROOT to your MedSAM repo path.")
             return False
         
         try:
-            # Resolve checkpoint path
-            checkpoint_dir = Path(self.checkpoint_path)
-            if checkpoint_dir.is_file():
-                checkpoint_file = checkpoint_dir
-            else:
-                checkpoint_file = checkpoint_dir / self.MODEL_CONFIG["checkpoint"]
-            
+            # Checkpoint must exist - no auto-download on cluster
+            checkpoint_file = Path(self.checkpoint_path)
             if not checkpoint_file.exists():
-                if not _download_checkpoint_if_needed(checkpoint_file):
-                    return False
+                logger.error(f"[MedSAMVisionEngine] Checkpoint NOT FOUND: {checkpoint_file}")
+                logger.error("[MedSAMVisionEngine] Set MEDSAM_CHECKPOINT_PATH to your .pth file:")
+                logger.error("[MedSAMVisionEngine]   export MEDSAM_CHECKPOINT_PATH=/scratch/ed21b031/models/medsam_checkpoints/sam_vit_b_01ec64.pth")
+                return False
 
             logger.info(f"[MedSAMVisionEngine] Loading checkpoint: {checkpoint_file}")
             
@@ -240,8 +217,8 @@ class MedSAMVisionEngine(VisionBackend):
                 _torch.cuda.empty_cache()
                 gc.collect()
             
-            # Build MedSAM model using sam_model_registry
-            self._model = _medsam["sam_model_registry"][self.MODEL_CONFIG["model_type"]](
+            # Build model using sam_model_registry (works with SAM or MedSAM checkpoint)
+            self._model = _medsam["sam_model_registry"][self.MODEL_TYPE](
                 checkpoint=str(checkpoint_file)
             )
             self._model = self._model.to(self.device)
