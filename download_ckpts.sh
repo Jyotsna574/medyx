@@ -1,30 +1,33 @@
 #!/bin/bash
 # ==============================================================================
-# MedSAM-2 Checkpoint Download Script
+# MedSAM Checkpoint Download Script
 # ==============================================================================
-# Downloads required model weights for MedSAM-2 inference
+# Downloads required model weights for MedSAM inference (bowang-lab/MedSAM)
 #
 # Usage:
 #   bash download_ckpts.sh
 #
 # Checkpoints downloaded:
-#   1. SAM-2 base model (sam2.1_hiera_large.pt) - Meta's foundation model
-#   2. MedSAM-2 fine-tuned weights - Medical imaging adaptation
+#   medsam_vit_b.pth - MedSAM ViT-B fine-tuned on medical images (~380MB)
+#
+# Reference:
+#   Ma et al., "Segment Anything in Medical Images", Nature Communications 2024
+#   https://github.com/bowang-lab/MedSAM
 # ==============================================================================
 
 set -e
 
 # Configuration
-CHECKPOINTS_DIR="./checkpoints"
-SAM2_MODEL_URL="https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
-SAM2_MODEL_NAME="sam2.1_hiera_large.pt"
-
-# MedSAM-2 weights from Hugging Face
-MEDSAM2_REPO="wanglab/MedSAM-2"
-MEDSAM2_WEIGHTS="medsam2_checkpoint.pt"
+CHECKPOINTS_DIR="${MEDSAM_CHECKPOINT_DIR:-${MEDSAM2_CHECKPOINT_DIR:-./checkpoints}}"
+MEDSAM_CHECKPOINT_URL="https://huggingface.co/wanglab/medsam-vit-b/resolve/main/medsam_vit_b.pth"
+MEDSAM_CHECKPOINT_NAME="medsam_vit_b.pth"
 
 echo "=============================================="
-echo "MedSAM-2 Checkpoint Download Script"
+echo "MedSAM Checkpoint Download Script"
+echo "=============================================="
+echo "Model: MedSAM (bowang-lab/MedSAM)"
+echo "Architecture: ViT-B"
+echo "Target: $CHECKPOINTS_DIR"
 echo "=============================================="
 
 # Create checkpoints directory
@@ -45,54 +48,20 @@ download_file() {
     fi
 }
 
-# Download SAM-2 base model
+# Download MedSAM checkpoint
 echo ""
-echo "[1/2] Downloading SAM-2.1 Base Model (Hiera Large)..."
-echo "      This is Meta's Segment Anything 2.1 foundation model"
-echo "      Size: ~900MB"
+echo "[1/1] Downloading MedSAM ViT-B Checkpoint..."
+echo "      Fine-tuned on 1.5M+ medical image-mask pairs"
+echo "      Size: ~380MB"
 echo ""
 
-SAM2_PATH="$CHECKPOINTS_DIR/$SAM2_MODEL_NAME"
-if [ -f "$SAM2_PATH" ]; then
-    echo "      SAM-2 checkpoint already exists, skipping..."
+MEDSAM_PATH="$CHECKPOINTS_DIR/$MEDSAM_CHECKPOINT_NAME"
+if [ -f "$MEDSAM_PATH" ]; then
+    echo "      MedSAM checkpoint already exists, skipping download..."
+    echo "      Location: $MEDSAM_PATH"
 else
-    download_file "$SAM2_MODEL_URL" "$SAM2_PATH"
-fi
-
-# Download MedSAM-2 weights via huggingface-hub
-echo ""
-echo "[2/2] Downloading MedSAM-2 Fine-tuned Weights..."
-echo "      Medical imaging adaptation layer"
-echo ""
-
-# Check if huggingface-hub is available
-if python -c "import huggingface_hub" 2>/dev/null; then
-    python -c "
-from huggingface_hub import hf_hub_download
-import os
-
-checkpoint_dir = '$CHECKPOINTS_DIR'
-medsam2_path = os.path.join(checkpoint_dir, '$MEDSAM2_WEIGHTS')
-
-if os.path.exists(medsam2_path):
-    print('      MedSAM-2 checkpoint already exists, skipping...')
-else:
-    try:
-        # Try to download from Hugging Face
-        downloaded_path = hf_hub_download(
-            repo_id='$MEDSAM2_REPO',
-            filename='$MEDSAM2_WEIGHTS',
-            local_dir=checkpoint_dir,
-            local_dir_use_symlinks=False
-        )
-        print(f'      Downloaded to: {downloaded_path}')
-    except Exception as e:
-        print(f'      Note: MedSAM-2 weights not available from HF ({e})')
-        print('      Using SAM-2 base model - fine-tuning weights can be added later')
-"
-else
-    echo "      Note: huggingface-hub not installed, skipping MedSAM-2 specific weights"
-    echo "      The SAM-2 base model will be used for inference"
+    download_file "$MEDSAM_CHECKPOINT_URL" "$MEDSAM_PATH"
+    echo "      Download complete: $MEDSAM_PATH"
 fi
 
 echo ""
@@ -101,9 +70,13 @@ echo "Checkpoint Download Complete!"
 echo "=============================================="
 echo ""
 echo "Checkpoints location: $CHECKPOINTS_DIR/"
-ls -lh "$CHECKPOINTS_DIR/" 2>/dev/null || echo "(directory created, awaiting downloads)"
+ls -lh "$CHECKPOINTS_DIR/" 2>/dev/null || echo "(directory created)"
+echo ""
+echo "Installation (if not done):"
+echo "  git clone https://github.com/bowang-lab/MedSAM"
+echo "  cd MedSAM && pip install -e ."
 echo ""
 echo "Next steps:"
-echo "  1. Activate environment: conda activate medsam2"
-echo "  2. Run inference test: python -m tests.test_vision_engine"
+echo "  1. Activate environment: conda activate medsam"
+echo "  2. Run inference: python run_mas_diagnosis.py"
 echo ""

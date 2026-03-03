@@ -18,6 +18,8 @@ Architecture:
 """
 
 import asyncio
+import os
+import re
 import sys
 from datetime import datetime
 from enum import Enum
@@ -42,6 +44,16 @@ from infrastructure.vision.medsam2_engine import (
 #     Neo4jQueryError,
 # )
 from infrastructure.llm_factory import get_llm_backend, get_provider_info
+
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+def _extract_field(text: str, pattern: str, default: str = "") -> str:
+    """Extract first regex match from text."""
+    match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+    return match.group(1).strip() if match else default
 
 
 # =============================================================================
@@ -196,13 +208,13 @@ class FinalConsensus(BaseModel):
 
 class MedSAMTool:
     """Custom tool for executing MedSAM-2 vision pipeline."""
-    
+
     def __init__(
         self,
-        checkpoint_path: str = "./checkpoints",
+        checkpoint_path: str | None = None,
         low_memory_mode: bool = True,
     ):
-        self.checkpoint_path = checkpoint_path
+        self.checkpoint_path = checkpoint_path or os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints")
         self.low_memory_mode = low_memory_mode
         self._provider: Optional[MedSAM2VisionProvider] = None
     
@@ -274,11 +286,7 @@ class MedSAMTool:
             },
             model_id=result.model_id,
         )
-        
-        logger.info(f"Geometric Metrics Extracted: pixel_area={metrics.pixel_area}, "
-                   f"circularity={metrics.circularity:.3f}, "
-                   f"confidence={metrics.confidence_score:.1%}")
-        
+
         return metrics
     
     def unload(self):
@@ -477,7 +485,7 @@ class MASOrchestrator:
     
     def __init__(
         self,
-        checkpoint_path: str = "./checkpoints",
+        checkpoint_path: str | None = None,
         low_memory_mode: bool = True,
         log_level: str = "INFO",
         log_file: Optional[str] = None,
@@ -486,18 +494,20 @@ class MASOrchestrator:
         Initialize the MAS Orchestrator.
         
         Args:
-            checkpoint_path: Path to MedSAM-2 checkpoints.
+            checkpoint_path: Path to MedSAM-2 checkpoints. Defaults to MEDSAM2_CHECKPOINT_DIR env.
             low_memory_mode: Enable GPU memory optimization.
             log_level: Logging level (DEBUG, INFO, WARNING, ERROR).
             log_file: Optional file path for logging output.
         """
         configure_logging(log_level, log_file)
         
+        ckpt = checkpoint_path or os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints")
+        
         logger.info("=" * 60)
         logger.info("Initializing Multi-Agent System Orchestrator")
         logger.info("=" * 60)
         
-        self.medsam_tool = MedSAMTool(checkpoint_path, low_memory_mode)
+        self.medsam_tool = MedSAMTool(ckpt, low_memory_mode)
         # Neo4j disabled for testing - uncomment to enable knowledge graph
         # self.neo4j_tool = Neo4jTool()
         self.neo4j_tool = None  # No Neo4j - vision + CAMEL agents only
@@ -599,23 +609,26 @@ class MASOrchestrator:
         geometric_metrics = await self._run_vision_analysis_agent(
             case.image_path, anatomical_bbox, case
         )
-        
+
         # Clear GPU memory after vision analysis
         self.medsam_tool.unload()
-        
+
+        # Pre-compute metrics text once (used by KG, Radiologist, Specialist)
+        metrics_text = geometric_metrics.to_clinical_text()
+
         # Step 3: Query Knowledge Graph
         knowledge_context = await self._run_kg_agent(
-            clinical_history, geometric_metrics
+            clinical_history, geometric_metrics, metrics_text
         )
-        
+
         # Step 4: Generate Preliminary Report
         preliminary_report = await self._run_radiologist_agent(
-            clinical_history, geometric_metrics, knowledge_context
+            clinical_history, geometric_metrics, knowledge_context, metrics_text
         )
-        
+
         # Step 5: Discussion & Consensus Loop
         final_consensus, discussion_messages = await self._run_consensus_loop(
-            preliminary_report, clinical_history, geometric_metrics, knowledge_context
+            preliminary_report, clinical_history, geometric_metrics, knowledge_context, metrics_text
         )
         
         # Step 6: Generate Final Report
@@ -655,50 +668,39 @@ Provide structured output using the required format.""",
         
         response = self.clinical_history_agent.step(message)
         parsed = self._parse_clinical_history(response.msg.content, case)
-        
-        logger.info(f"[ClinicalHistoryAgent] Chief: {parsed.chief_complaint[:80]}...")
-        
+        chief = parsed.chief_complaint or "N/A"
+        logger.info(f"[ClinicalHistoryAgent] Chief: {chief[:80]}{'...' if len(chief) > 80 else ''}")
+
         return parsed
     
     def _parse_clinical_history(
         self, response: str, case: PatientCase
     ) -> ClinicalHistory:
         """Parse the agent response into ClinicalHistory schema."""
-        import re
-        
-        def extract_field(pattern: str, default: str = "") -> str:
-            match = re.search(pattern, response, re.IGNORECASE | re.MULTILINE)
-            return match.group(1).strip() if match else default
-        
+
         def extract_list(pattern: str) -> list[str]:
-            value = extract_field(pattern, "")
+            value = _extract_field(response, pattern, "")
             if value and value.lower() not in ["none", "unknown", "none reported"]:
                 return [item.strip() for item in value.split(",") if item.strip()]
             return []
-        
+
         age = case.patient_age
-        age_str = extract_field(r"AGE:\s*(\d+)")
+        age_str = _extract_field(response, r"AGE:\s*(\d+)")
         if age_str and age_str.isdigit():
             age = int(age_str)
         
-        sex = case.patient_sex or extract_field(r"SEX:\s*([MF])", "Unknown")
-        
+        sex = case.patient_sex or _extract_field(response, r"SEX:\s*([MF])", "Unknown")
+
         return ClinicalHistory(
             age=age,
             sex=sex,
-            chief_complaint=extract_field(
-                r"CHIEF_COMPLAINT:\s*(.+?)(?=\n[A-Z]|$)", 
-                case.history[:200]
-            ),
-            history_present_illness=extract_field(
-                r"HISTORY_PRESENT_ILLNESS:\s*(.+?)(?=\n[A-Z]|$)",
-                case.history
-            ),
+            chief_complaint=_extract_field(response, r"CHIEF_COMPLAINT:\s*(.+?)(?=\n[A-Z]|$)", case.history[:200]),
+            history_present_illness=_extract_field(response, r"HISTORY_PRESENT_ILLNESS:\s*(.+?)(?=\n[A-Z]|$)", case.history),
             comorbidities=extract_list(r"COMORBIDITIES:\s*(.+?)(?=\n[A-Z]|$)"),
             medications=extract_list(r"MEDICATIONS:\s*(.+?)(?=\n[A-Z]|$)"),
             risk_factors=extract_list(r"RISK_FACTORS:\s*(.+?)(?=\n[A-Z]|$)"),
             family_history=extract_list(r"FAMILY_HISTORY:\s*(.+?)(?=\n[A-Z]|$)"),
-            social_history=extract_field(r"SOCIAL_HISTORY:\s*(.+?)(?=\n[A-Z]|$)"),
+            social_history=_extract_field(response, r"SOCIAL_HISTORY:\s*(.+?)(?=\n[A-Z]|$)"),
             raw_text=case.history,
         )
     
@@ -759,19 +761,15 @@ Provide structured output using the required format.""",
         self,
         clinical_history: ClinicalHistory,
         geometric_metrics: GeometricMetrics,
+        metrics_text: str,
     ) -> KnowledgeContext:
         """Run the Knowledge Graph Agent."""
         logger.info("[Agent: KGAgent] Querying knowledge graph...")
-        # Neo4j disabled - use placeholder; uncomment block below to restore
         knowledge_context = KnowledgeContext(
             guidelines="[Neo4j disabled - agents using clinical history and vision metrics only]",
             sources=[],
         )
-        # if self.neo4j_tool:
-        #     knowledge_context = await self.neo4j_tool.query_medical_knowledge(
-        #         clinical_history, geometric_metrics
-        #     )
-        
+
         message = BaseMessage.make_user_message(
             role_name="Case Coordinator",
             content=f"""Given this clinical case, synthesize the relevant medical knowledge:
@@ -782,7 +780,7 @@ CLINICAL HISTORY:
 - Risk Factors: {', '.join(clinical_history.risk_factors) or 'None'}
 
 IMAGING METRICS:
-{geometric_metrics.to_clinical_text()}
+{metrics_text}
 
 KNOWLEDGE BASE RESULTS:
 {knowledge_context.guidelines}
@@ -791,22 +789,20 @@ Provide relevant disease associations, risk assessments, and applicable guidelin
         )
         
         response = self.kg_agent.step(message)
-        
-        logger.info(f"[KGAgent] Knowledge Context Retrieved:")
-        logger.info(f"  Guidelines Length: {len(knowledge_context.guidelines)} chars")
-        logger.info(f"  Sources: {knowledge_context.sources}")
-        
+        logger.info(f"[KGAgent] Guidelines: {len(knowledge_context.guidelines)} chars")
+
         return knowledge_context
-    
+
     async def _run_radiologist_agent(
         self,
         clinical_history: ClinicalHistory,
         geometric_metrics: GeometricMetrics,
         knowledge_context: KnowledgeContext,
+        metrics_text: str,
     ) -> str:
         """Run the Radiologist Agent to draft preliminary report."""
         logger.info("[Agent: RadiologistAgent] Drafting preliminary report...")
-        
+
         message = BaseMessage.make_user_message(
             role_name="Case Coordinator",
             content=f"""Draft a preliminary diagnostic report based on the following inputs:
@@ -819,7 +815,7 @@ CLINICAL HISTORY:
 - Risk Factors: {', '.join(clinical_history.risk_factors) or 'None identified'}
 
 GEOMETRIC METRICS FROM VISION ANALYSIS:
-{geometric_metrics.to_clinical_text()}
+{metrics_text}
 
 KNOWLEDGE GRAPH CONTEXT:
 {knowledge_context.guidelines[:2000]}
@@ -842,29 +838,24 @@ CRITICAL: All findings must cite specific metrics from the vision analysis.""",
         clinical_history: ClinicalHistory,
         geometric_metrics: GeometricMetrics,
         knowledge_context: KnowledgeContext,
+        metrics_text: str,
     ) -> tuple[FinalConsensus, list[DiscussionMessage]]:
         """
         Run the bounded discussion loop between Radiologist and Specialist.
-        
-        Maximum of MAX_DISCUSSION_ITERATIONS iterations.
         Terminates on CONSENSUS_REACHED token or iteration limit.
         """
-        logger.info("=" * 40)
-        logger.info("Starting Radiologist-Specialist Discussion Loop")
-        logger.info(f"Maximum Iterations: {self.MAX_DISCUSSION_ITERATIONS}")
-        logger.info("=" * 40)
-        
+        logger.info(f"[Consensus] Starting loop (max {self.MAX_DISCUSSION_ITERATIONS} iterations)")
+
         discussion_messages: list[DiscussionMessage] = []
         current_report = preliminary_report
         iteration = 0
         consensus_reached = False
         specialist_response = ""
-        
+
         while iteration < self.MAX_DISCUSSION_ITERATIONS and not consensus_reached:
             iteration += 1
-            logger.info(f"[Discussion Iteration {iteration}/{self.MAX_DISCUSSION_ITERATIONS}]")
-            
-            # Specialist reviews the current report
+            is_final = iteration == self.MAX_DISCUSSION_ITERATIONS
+
             specialist_message = BaseMessage.make_user_message(
                 role_name="Case Coordinator",
                 content=f"""Review this diagnostic report from the Radiologist:
@@ -873,11 +864,11 @@ RADIOLOGIST'S REPORT:
 {current_report}
 
 ORIGINAL METRICS FOR VERIFICATION:
-{geometric_metrics.to_clinical_text()}
+{metrics_text}
 
 ITERATION: {iteration} of {self.MAX_DISCUSSION_ITERATIONS}
 
-{"This is the FINAL iteration. You MUST provide a final assessment with CONSENSUS_REACHED or DISAGREEMENT." if iteration == self.MAX_DISCUSSION_ITERATIONS else "Review the report and provide feedback or approval."}""",
+{"This is the FINAL iteration. You MUST provide a final assessment with CONSENSUS_REACHED or DISAGREEMENT." if is_final else "Review the report and provide feedback or approval."}""",
             )
             
             specialist_resp = self.specialist_agent.step(specialist_message)
@@ -888,9 +879,6 @@ ITERATION: {iteration} of {self.MAX_DISCUSSION_ITERATIONS}
                 content=specialist_response,
                 iteration=iteration,
             ))
-            
-            logger.info(f"[SpecialistAgent] Response (Iteration {iteration}):")
-            logger.debug(specialist_response)
             
             if self.TERMINATION_TOKEN in specialist_response.upper():
                 consensus_reached = True
@@ -910,7 +898,7 @@ SPECIALIST'S FEEDBACK:
 {specialist_response}
 
 ORIGINAL METRICS:
-{geometric_metrics.to_clinical_text()}
+{metrics_text}
 
 Respond to the Specialist's concerns and revise your report if needed.""",
                 )
@@ -923,9 +911,6 @@ Respond to the Specialist's concerns and revise your report if needed.""",
                     content=current_report,
                     iteration=iteration,
                 ))
-                
-                logger.info(f"[RadiologistAgent] Revised Report (Iteration {iteration})")
-                logger.debug(current_report[:500])
         
         if iteration >= self.MAX_DISCUSSION_ITERATIONS and not consensus_reached:
             logger.warning(f"[MAX ITERATIONS REACHED] Forcing final assessment")
@@ -951,26 +936,20 @@ Respond to the Specialist's concerns and revise your report if needed.""",
         consensus_reached: bool,
     ) -> FinalConsensus:
         """Parse the final consensus from specialist response."""
-        import re
-        
-        def extract_field(text: str, pattern: str, default: str = "") -> str:
-            match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
-            return match.group(1).strip() if match else default
-        
         combined = specialist_response + "\n" + current_report
-        
+
         status = ConsensusStatus.CONSENSUS_REACHED if consensus_reached else (
             ConsensusStatus.DISAGREEMENT if "DISAGREEMENT" in specialist_response.upper()
             else ConsensusStatus.MAX_ITERATIONS_REACHED
         )
-        
-        primary_diagnosis = extract_field(
+
+        primary_diagnosis = _extract_field(
             combined,
             r"(?:FINAL_DIAGNOSIS|PRIMARY_IMPRESSION|PRIMARY_DIAGNOSIS):\s*(.+?)(?:\n|$)",
             "Requires further evaluation"
         )
         
-        severity = extract_field(
+        severity = _extract_field(
             combined,
             r"(?:FINAL_SEVERITY|SEVERITY):\s*(\w+)",
             "MODERATE"
@@ -978,14 +957,14 @@ Respond to the Specialist's concerns and revise your report if needed.""",
         if severity not in ["NORMAL", "MILD", "MODERATE", "SEVERE", "CRITICAL"]:
             severity = "MODERATE"
         
-        confidence_str = extract_field(combined, r"(?:FINAL_)?CONFIDENCE:\s*([\d.]+)", "0.7")
+        confidence_str = _extract_field(combined, r"(?:FINAL_)?CONFIDENCE:\s*([\d.]+)", "0.7")
         try:
             confidence = float(confidence_str)
             confidence = min(1.0, max(0.0, confidence))
         except ValueError:
             confidence = 0.7
         
-        urgency = extract_field(
+        urgency = _extract_field(
             combined,
             r"(?:FINAL_)?URGENCY:\s*(\w+)",
             "ROUTINE"
@@ -993,7 +972,7 @@ Respond to the Specialist's concerns and revise your report if needed.""",
         if urgency not in ["ROUTINE", "SOON", "URGENT", "EMERGENCY"]:
             urgency = "ROUTINE"
         
-        metrics_justification = extract_field(
+        metrics_justification = _extract_field(
             combined,
             r"METRICS_JUSTIFICATION:\s*(.+?)(?=\n[A-Z_]+:|$)",
             "See geometric metrics in report"
@@ -1008,7 +987,7 @@ Respond to the Specialist's concerns and revise your report if needed.""",
             differential_diagnoses=[],
             recommended_actions=[],
             follow_up_timeline="As clinically indicated",
-            clinical_notes=extract_field(combined, r"CLINICAL_NOTES:\s*(.+?)(?:\n|$)", ""),
+            clinical_notes=_extract_field(combined, r"CLINICAL_NOTES:\s*(.+?)(?:\n|$)", ""),
             metrics_justification=metrics_justification,
             discussion_summary=f"Consensus reached after {iterations} iteration(s)",
             iterations_used=iterations,
@@ -1084,7 +1063,6 @@ Respond to the Specialist's concerns and revise your report if needed.""",
         #     self.neo4j_tool.close()
         logger.info("MAS cleanup complete")
 
-
 # =============================================================================
 # CONVENIENCE FUNCTIONS
 # =============================================================================
@@ -1092,22 +1070,29 @@ Respond to the Specialist's concerns and revise your report if needed.""",
 async def run_mas_diagnosis(
     case: PatientCase,
     anatomical_bbox: Optional[list[int]] = None,
+    checkpoint_path: str | None = None,
+    low_memory_mode: bool = True,
     log_level: str = "INFO",
     log_file: Optional[str] = None,
 ) -> tuple[DiagnosticReport, list[DiscussionMessage]]:
     """
     Convenience function to run a full MAS diagnosis.
-    
+
     Args:
         case: Patient case with symptoms and image.
         anatomical_bbox: Optional targeted bounding box.
+        checkpoint_path: Path to MedSAM-2 checkpoints.
+        low_memory_mode: Enable GPU memory optimization.
         log_level: Logging verbosity.
         log_file: Optional log file path.
-        
+
     Returns:
         Tuple of (DiagnosticReport, discussion_messages).
     """
+    ckpt = checkpoint_path or os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints")
     orchestrator = MASOrchestrator(
+        checkpoint_path=ckpt,
+        low_memory_mode=low_memory_mode,
         log_level=log_level,
         log_file=log_file,
     )
@@ -1116,3 +1101,4 @@ async def run_mas_diagnosis(
         return await orchestrator.run_diagnosis(case, anatomical_bbox)
     finally:
         orchestrator.cleanup()
+

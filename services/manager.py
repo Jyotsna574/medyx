@@ -76,7 +76,7 @@ class DiagnosisManager:
         if use_medsam2:
             try:
                 self.vision_provider = MedSAM2VisionProvider(
-                    checkpoint_path=checkpoint_path or "./checkpoints",
+                    checkpoint_path=checkpoint_path or os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints"),
                     preload_model=preload_vision_model,
                     low_memory_mode=low_memory_mode,
                 )

@@ -7,40 +7,24 @@
 #SBATCH --output=job.%j.out
 #SBATCH --error=job.%j.err
 #
-# Param Shakti - Run MAS Diagnostic Pipeline with local Med42 model
-# Usage: cp run_job.example.sh run_job.sh; edit run_job.sh for your cluster; sbatch run_job.sh
+# Usage: cp run_job.example.sh run_job.sh; edit paths; sbatch run_job.sh
 
 set -e
-
-# Project directory (adjust if needed)
-PROJECT_DIR="${HOME}/ddp/medyx"
+PROJECT_DIR="${PROJECT_DIR:-$HOME/ddp/medyx}"
 cd "${PROJECT_DIR}"
 
-# Load env vars from .env if present (Neo4j creds, etc.)
-if [ -f .env ]; then
-    set -a
-    source .env
-    set +a
-    echo "Loaded .env"
-fi
+[ -f .env ] && set -a && source .env && set +a
 
-# Local model settings
+# Model cache base (persists across job runs)
+MODELS_BASE="${MODELS_BASE:-/scratch/ed21b031/models}"
+
 export ACTIVE_PROVIDER=local
-export LOCAL_MODEL_PATH="${HOME}/ddp/medyx/models/med42_8b"
+export LOCAL_MODEL_PATH="${LOCAL_MODEL_PATH:-$MODELS_BASE/med42_8b}"
 
-# Neo4j disabled for testing - uncomment below to require Neo4j
-# export NEO4J_USERNAME="${NEO4J_USERNAME:-neo4j}"
-# export NEO4J_PASSWORD="${NEO4J_PASSWORD:-}"
-# if [ -z "${NEO4J_URI}" ]; then
-#     echo "ERROR: NEO4J_URI not set. Create .env with NEO4J_URI=bolt://<login-node>:7687"
-#     exit 1
-# fi
+# MedSAM: checkpoint dir; download once, reuse on subsequent runs
+export MEDSAM_CHECKPOINT_DIR="${MEDSAM_CHECKPOINT_DIR:-$MODELS_BASE/medsam_checkpoints}"
 
-echo "=============================================="
-echo "MAD MAS Diagnosis - Param Shakti"
-echo "=============================================="
-echo "ACTIVE_PROVIDER=${ACTIVE_PROVIDER}"
-echo "LOCAL_MODEL_PATH=${LOCAL_MODEL_PATH}"
-echo "=============================================="
+# HuggingFace (Med42-8B, etc.): cache dir; download once, reuse on subsequent runs
+export HF_HOME="${HF_HOME:-$MODELS_BASE/huggingface}"
 
 python run_mas_diagnosis.py

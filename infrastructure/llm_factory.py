@@ -1,23 +1,10 @@
 """
 LLM Backend Factory for MedicalAgentDiagnosis-MAD.
 
-Provides a unified factory function to instantiate LLM backends based on
-configuration. Supports both cloud APIs (Gemini, OpenAI, Anthropic) via
-CAMEL-AI and local HuggingFace models with 4-bit quantization.
+Provides CAMEL-AI compatible backends: Gemini (cloud) or local HuggingFace.
 
-Usage:
-    from infrastructure.llm_factory import get_llm_backend
-    
-    # Returns CAMEL-AI compatible model backend based on config
-    model = get_llm_backend()
-    
-    # Use with CAMEL-AI ChatAgent
-    agent = ChatAgent(system_message=..., model=model)
-
-Environment Variables:
-    ACTIVE_PROVIDER: 'gemini', 'openai', 'anthropic', 'local', 'ollama'
-    LOCAL_ACTIVE_MODEL: 'biomistral_7b', 'med42_8b', 'meditron_70b', etc.
-    LOCAL_MODEL_PATH: Path to pre-downloaded model (skips HuggingFace download)
+Environment: ACTIVE_PROVIDER=gemini|local, GOOGLE_API_KEY, LOCAL_MODEL_PATH,
+             HF_HOME (HuggingFace cache dir, e.g. /scratch/.../huggingface)
 """
 
 import gc
@@ -670,66 +657,29 @@ def get_llm_backend(provider: Optional[str] = None):
 
 
 def _create_camel_backend(provider: str):
-    """Create a CAMEL-AI model backend for cloud APIs."""
+    """Create Gemini CAMEL-AI backend."""
     from camel.models import ModelFactory
     from camel.types import ModelPlatformType, ModelType
-    
-    provider_config = model_config.get_provider_config(provider)
-    api_key = model_config.get_api_key(provider)
-    
+
+    if provider != "gemini":
+        raise ValueError(f"Unknown provider: {provider}. Use gemini or local.")
+
+    api_key = model_config.get_api_key("gemini")
     if not api_key:
-        api_key_env = provider_config.get("api_key_env", "UNKNOWN")
-        raise ValueError(
-            f"API key not found for provider '{provider}'. "
-            f"Set the {api_key_env} environment variable."
-        )
-    
-    # Map provider to CAMEL platform and model types
-    platform_map = {
-        "gemini": ModelPlatformType.GEMINI,
-        "openai": ModelPlatformType.OPENAI,
-        "openai_turbo": ModelPlatformType.OPENAI,
-        "anthropic": ModelPlatformType.ANTHROPIC,
-        "ollama": ModelPlatformType.OLLAMA,
-    }
-    
-    # Model type mapping - use string-based lookup for flexibility
-    model_name = provider_config.get("model", "")
-    
-    platform = platform_map.get(provider)
-    if platform is None:
-        raise ValueError(f"Unknown provider: {provider}")
-    
-    # For Gemini, use specific model type
-    if provider == "gemini":
-        model_type = ModelType.GEMINI_2_0_FLASH
-    elif provider in ("openai", "openai_turbo"):
-        # Map OpenAI models
-        if "gpt-4-turbo" in model_name:
-            model_type = ModelType.GPT_4_TURBO
-        elif "gpt-4o-mini" in model_name:
-            model_type = ModelType.GPT_4O_MINI
-        elif "gpt-4o" in model_name:
-            model_type = ModelType.GPT_4O
-        else:
-            model_type = ModelType.GPT_4O_MINI
-    elif provider == "anthropic":
-        model_type = ModelType.CLAUDE_3_5_SONNET
-    else:
-        # Default fallback
-        model_type = ModelType.GEMINI_2_0_FLASH
-    
-    print(f"[LLM Factory] Creating CAMEL backend: {platform} / {model_type}")
-    
+        raise ValueError("GOOGLE_API_KEY not set.")
+
     return ModelFactory.create(
-        model_platform=platform,
-        model_type=model_type,
+        model_platform=ModelPlatformType.GEMINI,
+        model_type=ModelType.GEMINI_2_0_FLASH,
         api_key=api_key,
     )
 
 
 def _create_huggingface_backend() -> HuggingFaceModelBackend:
     """Create a HuggingFace local model backend compatible with CAMEL-AI."""
+    hf_home = os.environ.get("HF_HOME")
+    if hf_home:
+        print(f"[LLM Factory] HuggingFace cache: {hf_home}")
     local_config = model_config.get_local_model_config()
     
     if not local_config:

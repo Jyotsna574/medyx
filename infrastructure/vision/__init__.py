@@ -4,11 +4,15 @@ Provides AI-powered medical image analysis through configurable backends.
 
 Components:
 - VisionProvider: Main provider for image analysis (placeholder)
-- MedSAM2VisionProvider: Production MedSAM-2 segmentation provider
-- MedSAM2VisionEngine: Low-level MedSAM-2 inference engine
+- MedSAMVisionProvider: Production MedSAM segmentation provider (bowang-lab)
+- MedSAMVisionEngine: Low-level MedSAM inference engine
 - VisionBackend: Abstract base class for implementing custom backends
 - VisionAnalysisResult: Standard result format from any backend
 - DomainConfig: Domain-specific configuration for metric extraction
+
+Reference:
+    Ma et al., "Segment Anything in Medical Images", Nature Communications 2024
+    https://github.com/bowang-lab/MedSAM
 """
 
 from .vision_provider import (
@@ -19,8 +23,10 @@ from .vision_provider import (
 )
 
 from .medsam2_engine import (
-    MedSAM2VisionEngine,
-    MedSAM2VisionProvider,
+    MedSAMVisionEngine,
+    MedSAMVisionProvider,
+    MedSAM2VisionEngine,  # backward compat alias
+    MedSAM2VisionProvider,  # backward compat alias
     DomainConfig,
     PromptType,
     SegmentationPrompt,
@@ -33,9 +39,13 @@ __all__ = [
     "VisionBackend",
     "VisionAnalysisResult",
     "PlaceholderVisionBackend",
-    # MedSAM-2 Production
+    # MedSAM Production (bowang-lab)
+    "MedSAMVisionEngine",
+    "MedSAMVisionProvider",
+    # Backward compatibility aliases
     "MedSAM2VisionEngine",
     "MedSAM2VisionProvider",
+    # Helpers
     "DomainConfig",
     "PromptType",
     "SegmentationPrompt",

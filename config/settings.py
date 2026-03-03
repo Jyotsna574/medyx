@@ -1,7 +1,7 @@
 """Configuration management for MedicalAgentDiagnosis-MAD.
 
-Loads settings from environment variables and YAML configuration files.
-Supports switching between cloud APIs (Gemini, OpenAI) and local HuggingFace models.
+Loads settings from environment variables and YAML.
+Supports: Gemini (cloud) and local HuggingFace models.
 """
 
 import os
@@ -35,32 +35,7 @@ def load_yaml_config(filename: str) -> dict[str, Any]:
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables.
-    
-    Environment Variables:
-        API Keys:
-            GOOGLE_API_KEY: Google/Gemini API key
-            OPENAI_API_KEY: OpenAI API key
-            ANTHROPIC_API_KEY: Anthropic API key
-        
-        Database:
-            NEO4J_URI: Neo4j connection URI
-            NEO4J_USERNAME: Neo4j username
-            NEO4J_PASSWORD: Neo4j password
-        
-        Model Selection:
-            ACTIVE_PROVIDER: Override active_provider in models.yaml
-                             Options: 'gemini', 'openai', 'anthropic', 'local', 'ollama'
-            LOCAL_ACTIVE_MODEL: Override active_model for local provider
-                                Options: 'biomistral_7b', 'med42_8b', 'meditron_70b', etc.
-            LOCAL_MODEL_PATH: Path to pre-downloaded model directory
-                              If set, skips HuggingFace download and loads from this path
-        
-        Application:
-            APP_NAME: Application name
-            DEBUG: Debug mode
-            LOG_LEVEL: Logging level
-    """
+    """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -69,20 +44,16 @@ class Settings(BaseSettings):
     )
 
     # API Keys
-    openai_api_key: str = Field(default="", description="OpenAI API key")
     google_api_key: str = Field(default="", description="Google/Gemini API key")
-    anthropic_api_key: str = Field(default="", description="Anthropic API key")
+
 
     # Database URIs
     neo4j_uri: str = Field(default="bolt://localhost:7687", description="Neo4j connection URI")
     neo4j_username: str = Field(default="neo4j", description="Neo4j username")
     neo4j_password: str = Field(default="", description="Neo4j password")
 
-    # Model Selection - Environment variable overrides for models.yaml
-    active_provider: str = Field(
-        default="",
-        description="Override active_provider in models.yaml. Options: gemini, openai, anthropic, local, ollama"
-    )
+    # Model Selection
+    active_provider: str = Field(default="", description="gemini | local")
     local_active_model: str = Field(
         default="",
         description="Override active_model for local HuggingFace provider. Options: biomistral_7b, med42_8b, meditron_70b, clinical_camel_70b, openbiollm_70b"
@@ -132,7 +103,7 @@ class ModelConfig:
         """Get configuration for a specific provider.
         
         Args:
-            provider: Provider name (e.g., 'openai', 'gemini', 'local'). 
+            provider: Provider name (gemini or local). 
                      Uses active provider if None.
             
         Returns:
@@ -225,14 +196,8 @@ class ModelConfig:
         if api_key_env:
             return os.getenv(api_key_env, "")
         
-        # Fallback to common patterns
         if provider == "gemini":
             return self._settings.google_api_key
-        elif provider == "openai" or provider == "openai_turbo":
-            return self._settings.openai_api_key
-        elif provider == "anthropic":
-            return self._settings.anthropic_api_key
-        
         return ""
     
     def reload(self):

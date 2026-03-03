@@ -1,13 +1,26 @@
 """
-MedSAM-2 Vision Engine - Production-ready medical image segmentation.
+MedSAM Vision Engine - Medical image segmentation using bowang-lab/MedSAM.
 
-This module provides real MedSAM-2 inference for medical image analysis,
+This module provides MedSAM inference for medical image analysis,
 extracting geometric metrics from segmentation masks for downstream
 multi-agent diagnostic reasoning.
+
+Based on: https://github.com/bowang-lab/MedSAM
+Paper: "Segment Anything in Medical Images" (Nature Communications 2024)
+
+Environment:
+    MEDSAM_CHECKPOINT_DIR: Directory for checkpoints (default: ./checkpoints).
+                           Use a persistent path (e.g. /scratch/user/models) on clusters.
+
+Installation:
+    1. git clone https://github.com/bowang-lab/MedSAM
+    2. cd MedSAM && pip install -e .
+    3. Download medsam_vit_b.pth checkpoint
 """
 
 import gc
 import os
+import urllib.request
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -20,9 +33,13 @@ from PIL import Image
 from core.schemas import VisionMetrics
 from infrastructure.vision.vision_provider import VisionBackend, VisionAnalysisResult
 
-# Lazy imports for PyTorch and SAM-2 to avoid loading CUDA until needed
+# MedSAM checkpoint download URL (from official release)
+# ~380MB ViT-B checkpoint fine-tuned on medical images
+MEDSAM_CHECKPOINT_URL = "https://huggingface.co/wanglab/medsam-vit-b/resolve/main/medsam_vit_b.pth"
+
+# Lazy imports for PyTorch and MedSAM to avoid loading CUDA until needed
 torch = None
-sam2 = None
+segment_anything = None
 
 
 def _lazy_import_torch():
@@ -34,19 +51,51 @@ def _lazy_import_torch():
     return torch
 
 
-def _lazy_import_sam2():
-    """Lazily import SAM-2 modules."""
-    global sam2
-    if sam2 is None:
+def _get_checkpoint_dir() -> str:
+    """Resolve checkpoint directory from MEDSAM_CHECKPOINT_DIR env or default."""
+    return os.environ.get("MEDSAM_CHECKPOINT_DIR", 
+                          os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints"))
+
+
+def _download_checkpoint_if_needed(checkpoint_file: Path) -> bool:
+    """
+    Download MedSAM checkpoint if it does not exist locally.
+    Returns True if checkpoint is available (existing or newly downloaded).
+    """
+    if checkpoint_file.exists():
+        logger.info(f"[MedSAM] Checkpoint found, skipping download: {checkpoint_file}")
+        return True
+
+    checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("[MedSAM] Downloading checkpoint for the first time...")
+    logger.info(f"[MedSAM] URL: {MEDSAM_CHECKPOINT_URL}")
+    logger.info(f"[MedSAM] Target: {checkpoint_file} (~380MB)")
+
+    try:
+        urllib.request.urlretrieve(MEDSAM_CHECKPOINT_URL, checkpoint_file)
+        logger.info("[MedSAM] Download complete.")
+        return True
+    except Exception as e:
+        logger.exception(f"[MedSAM] Download failed: {e}")
+        logger.info("[MedSAM] Manual download: https://github.com/bowang-lab/MedSAM#get-started")
+        return False
+
+
+def _lazy_import_medsam():
+    """Lazily import MedSAM/segment_anything modules."""
+    global segment_anything
+    if segment_anything is None:
         try:
-            from sam2.build_sam import build_sam2
-            from sam2.sam2_image_predictor import SAM2ImagePredictor
-            sam2 = {"build_sam2": build_sam2, "SAM2ImagePredictor": SAM2ImagePredictor}
+            from segment_anything import sam_model_registry, SamPredictor
+            segment_anything = {
+                "sam_model_registry": sam_model_registry,
+                "SamPredictor": SamPredictor,
+            }
         except ImportError as e:
-            logger.error(f"[MedSAM2] SAM-2 import FAILED: {e}")
-            logger.error("[MedSAM2] Install SAM-2 from GitHub: pip install git+https://github.com/facebookresearch/segment-anything-2.git")
-            sam2 = None
-    return sam2
+            logger.error(f"[MedSAM] segment_anything import FAILED: {e}")
+            logger.error("[MedSAM] Install MedSAM: git clone https://github.com/bowang-lab/MedSAM && cd MedSAM && pip install -e .")
+            segment_anything = None
+    return segment_anything
 
 
 class PromptType(Enum):
@@ -79,63 +128,51 @@ class DomainConfig:
 
 @dataclass
 class SegmentationResult:
-    """Result from MedSAM-2 segmentation."""
+    """Result from MedSAM segmentation."""
     mask: np.ndarray  # Binary segmentation mask (H, W) or (D, H, W)
     confidence_score: float  # Model confidence
     logits: Optional[np.ndarray] = None  # Raw logits before thresholding
     prompt_used: Optional[SegmentationPrompt] = None
 
 
-class MedSAM2VisionEngine(VisionBackend):
+class MedSAMVisionEngine(VisionBackend):
     """
-    Production MedSAM-2 Vision Engine.
+    Production MedSAM Vision Engine (bowang-lab/MedSAM).
     
-    Performs real segmentation inference using SAM-2 architecture,
-    extracts geometric metrics from masks, and returns validated
-    VisionMetrics for downstream multi-agent processing.
+    Performs real segmentation inference using SAM ViT-B architecture
+    fine-tuned on medical images. Extracts geometric metrics from masks
+    and returns validated VisionMetrics for downstream multi-agent processing.
+    
+    Reference:
+        Ma et al., "Segment Anything in Medical Images", Nature Communications (2024)
+        https://github.com/bowang-lab/MedSAM
     """
     
-    # SAM-2 model configurations
-    MODEL_CONFIGS = {
-        "sam2.1_hiera_large": {
-            "config": "configs/sam2.1/sam2.1_hiera_l.yaml",
-            "checkpoint": "sam2.1_hiera_large.pt",
-        },
-        "sam2.1_hiera_base_plus": {
-            "config": "configs/sam2.1/sam2.1_hiera_b+.yaml",
-            "checkpoint": "sam2.1_hiera_base_plus.pt",
-        },
-        "sam2.1_hiera_small": {
-            "config": "configs/sam2.1/sam2.1_hiera_s.yaml",
-            "checkpoint": "sam2.1_hiera_small.pt",
-        },
-        "sam2.1_hiera_tiny": {
-            "config": "configs/sam2.1/sam2.1_hiera_t.yaml",
-            "checkpoint": "sam2.1_hiera_tiny.pt",
-        },
+    # MedSAM model configuration (ViT-B based)
+    MODEL_CONFIG = {
+        "model_type": "vit_b",
+        "checkpoint": "medsam_vit_b.pth",
+        "image_size": 1024,
     }
     
     def __init__(
         self,
         checkpoint_path: Optional[str] = None,
-        model_variant: str = "sam2.1_hiera_large",
         device: Optional[str] = None,
         use_float16: bool = True,
         low_memory_mode: bool = False,
     ):
         """
-        Initialize the MedSAM-2 Vision Engine.
+        Initialize the MedSAM Vision Engine.
         
         Args:
-            checkpoint_path: Path to the checkpoint directory or file.
-                            Defaults to ./checkpoints/
-            model_variant: Which SAM-2 model variant to use.
+            checkpoint_path: Path to the checkpoint directory or file. Defaults to
+                            MEDSAM_CHECKPOINT_DIR env or ./checkpoints/
             device: Device to run inference on ('cuda', 'cpu', or None for auto).
             use_float16: Use FP16 for reduced memory on GPU.
             low_memory_mode: Enable aggressive memory optimization for limited VRAM.
         """
-        self.checkpoint_path = checkpoint_path or "./checkpoints"
-        self.model_variant = model_variant
+        self.checkpoint_path = checkpoint_path or _get_checkpoint_dir()
         self.use_float16 = use_float16
         self.low_memory_mode = low_memory_mode
         
@@ -151,11 +188,11 @@ class MedSAM2VisionEngine(VisionBackend):
         self._loaded = False
         self._current_image_set = False
         
-        logger.info(f"[MedSAM2VisionEngine] Initialized | Model: {model_variant} | Device: {self.device} | FP16: {use_float16} | Low Memory: {low_memory_mode}")
+        logger.info(f"[MedSAMVisionEngine] Initialized | Model: medsam_vit_b | Device: {self.device} | FP16: {use_float16} | Low Memory: {low_memory_mode}")
     
     def load(self) -> bool:
         """
-        Load the MedSAM-2 model into memory.
+        Load the MedSAM model into memory.
         
         Returns:
             True if successfully loaded, False otherwise.
@@ -164,10 +201,11 @@ class MedSAM2VisionEngine(VisionBackend):
             return True
         
         _torch = _lazy_import_torch()
-        _sam2 = _lazy_import_sam2()
+        _medsam = _lazy_import_medsam()
         
-        if _sam2 is None:
-            logger.error("[MedSAM2VisionEngine] SAM-2 package not installed. Install with: pip install segment-anything-2")
+        if _medsam is None:
+            logger.error("[MedSAMVisionEngine] MedSAM package not installed.")
+            logger.error("[MedSAMVisionEngine] Install: git clone https://github.com/bowang-lab/MedSAM && cd MedSAM && pip install -e .")
             return False
         
         try:
@@ -176,42 +214,37 @@ class MedSAM2VisionEngine(VisionBackend):
             if checkpoint_dir.is_file():
                 checkpoint_file = checkpoint_dir
             else:
-                model_cfg = self.MODEL_CONFIGS.get(self.model_variant)
-                if not model_cfg:
-                    logger.error(f"[MedSAM2VisionEngine] Unknown model variant: {self.model_variant}")
-                    return False
-                checkpoint_file = checkpoint_dir / model_cfg["checkpoint"]
+                checkpoint_file = checkpoint_dir / self.MODEL_CONFIG["checkpoint"]
             
             if not checkpoint_file.exists():
-                logger.error(f"[MedSAM2VisionEngine] Checkpoint not found: {checkpoint_file}")
-                return False
-            
-            logger.info(f"[MedSAM2VisionEngine] Loading checkpoint: {checkpoint_file}")
-            
-            # Build SAM-2 model
-            model_cfg = self.MODEL_CONFIGS.get(self.model_variant, {})
-            config_path = model_cfg.get("config", "configs/sam2.1/sam2.1_hiera_l.yaml")
+                if not _download_checkpoint_if_needed(checkpoint_file):
+                    return False
+
+            logger.info(f"[MedSAMVisionEngine] Loading checkpoint: {checkpoint_file}")
             
             # For low-memory mode on limited VRAM GPUs
             if self.low_memory_mode and self.device == "cuda":
                 _torch.cuda.empty_cache()
                 gc.collect()
             
-            self._model = _sam2["build_sam2"](
-                config_file=config_path,
-                ckpt_path=str(checkpoint_file),
-                device=self.device,
+            # Build MedSAM model using sam_model_registry
+            self._model = _medsam["sam_model_registry"][self.MODEL_CONFIG["model_type"]](
+                checkpoint=str(checkpoint_file)
             )
+            self._model = self._model.to(self.device)
             
-            # Note: Don't use .half() directly on the model as it causes
-            # dtype mismatches with the predictor's image preprocessing.
-            # Instead, we use autocast during inference for memory savings.
+            # Use FP16 for memory savings on GPU
+            if self.use_float16 and self.device == "cuda":
+                self._model = self._model.half()
+            
+            # Set to eval mode
+            self._model.eval()
             
             # Create predictor
-            self._predictor = _sam2["SAM2ImagePredictor"](self._model)
+            self._predictor = _medsam["SamPredictor"](self._model)
             
             self._loaded = True
-            logger.info(f"[MedSAM2VisionEngine] Model loaded successfully")
+            logger.info(f"[MedSAMVisionEngine] Model loaded successfully")
             
             # Report memory usage
             if self.device == "cuda":
@@ -221,7 +254,7 @@ class MedSAM2VisionEngine(VisionBackend):
             return True
             
         except Exception as e:
-            logger.exception(f"[MedSAM2VisionEngine] Failed to load model: {e}")
+            logger.exception(f"[MedSAMVisionEngine] Failed to load model: {e}")
             return False
     
     def analyze(
@@ -232,7 +265,7 @@ class MedSAM2VisionEngine(VisionBackend):
         domain_config: Optional[DomainConfig] = None,
     ) -> VisionAnalysisResult:
         """
-        Analyze a medical image using MedSAM-2 segmentation.
+        Analyze a medical image using MedSAM segmentation.
         
         Args:
             image_path: Path to the medical image file.
@@ -250,8 +283,8 @@ class MedSAM2VisionEngine(VisionBackend):
         if not self._loaded:
             if not self.load():
                 return VisionAnalysisResult(
-                    error="Failed to load MedSAM-2 model",
-                    model_id=self.model_variant,
+                    error="Failed to load MedSAM model",
+                    model_id="medsam_vit_b",
                 )
         
         _torch = _lazy_import_torch()
@@ -260,7 +293,7 @@ class MedSAM2VisionEngine(VisionBackend):
         if not os.path.exists(image_path):
             return VisionAnalysisResult(
                 error=f"Image file not found: {image_path}",
-                model_id=self.model_variant,
+                model_id="medsam_vit_b",
             )
         
         try:
@@ -296,7 +329,7 @@ class MedSAM2VisionEngine(VisionBackend):
                 confidence_scores={"segmentation": seg_result.confidence_score},
                 extracted_geometry=geometry,
                 overall_risk_score=risk_score,
-                model_id=self.model_variant,
+                model_id="medsam_vit_b",
                 image_processed=True,
                 raw_output={
                     "mask_shape": list(seg_result.mask.shape),
@@ -305,10 +338,10 @@ class MedSAM2VisionEngine(VisionBackend):
             )
             
         except Exception as e:
-            logger.exception(f"[MedSAM2VisionEngine] Analysis error: {e}")
+            logger.exception(f"[MedSAMVisionEngine] Analysis error: {e}")
             return VisionAnalysisResult(
                 error=str(e),
-                model_id=self.model_variant,
+                model_id="medsam_vit_b",
             )
         finally:
             # Aggressive memory cleanup for low-memory mode
@@ -503,7 +536,7 @@ class MedSAM2VisionEngine(VisionBackend):
         return None
     
     def _load_image(self, image_path: str) -> np.ndarray:
-        """Load and preprocess an image for SAM-2."""
+        """Load and preprocess an image for MedSAM."""
         image = Image.open(image_path)
         
         # Convert to RGB if needed
@@ -516,13 +549,16 @@ class MedSAM2VisionEngine(VisionBackend):
         """Set the current image in the predictor."""
         _torch = _lazy_import_torch()
         
-        with _torch.inference_mode():
+        with _torch.no_grad():
             self._predictor.set_image(image)
         self._current_image_set = True
     
     def _clear_image(self) -> None:
         """Clear the current image from predictor."""
         self._current_image_set = False
+        # Reset predictor state
+        if self._predictor is not None:
+            self._predictor.reset_image()
     
     def _prepare_prompt(
         self,
@@ -557,10 +593,10 @@ class MedSAM2VisionEngine(VisionBackend):
         )
     
     def _run_inference(self, prompt: SegmentationPrompt) -> SegmentationResult:
-        """Run SAM-2 inference with the given prompt."""
+        """Run MedSAM inference with the given prompt."""
         _torch = _lazy_import_torch()
         
-        with _torch.inference_mode():
+        with _torch.no_grad():
             if prompt.prompt_type == PromptType.BOUNDING_BOX:
                 box = np.array(prompt.data, dtype=np.float32)
                 masks, scores, logits = self._predictor.predict(
@@ -746,19 +782,21 @@ class MedSAM2VisionEngine(VisionBackend):
             _torch.cuda.empty_cache()
             gc.collect()
         
-        logger.info("[MedSAM2VisionEngine] Model unloaded")
+        logger.info("[MedSAMVisionEngine] Model unloaded")
     
     def get_info(self) -> dict:
         """Get information about this backend."""
         _torch = _lazy_import_torch()
         
         info = {
-            "model_id": f"medsam2-{self.model_variant}",
-            "type": "MedSAM-2",
+            "model_id": "medsam_vit_b",
+            "type": "MedSAM (bowang-lab)",
+            "architecture": "ViT-B",
             "loaded": self._loaded,
             "device": self.device,
             "fp16": self.use_float16,
             "low_memory_mode": self.low_memory_mode,
+            "reference": "Ma et al., Nature Communications 2024",
         }
         
         if self._loaded and self.device == "cuda":
@@ -768,9 +806,13 @@ class MedSAM2VisionEngine(VisionBackend):
         return info
 
 
-class MedSAM2VisionProvider:
+# Backward compatibility aliases
+MedSAM2VisionEngine = MedSAMVisionEngine
+
+
+class MedSAMVisionProvider:
     """
-    High-level Vision Provider using MedSAM-2 engine.
+    High-level Vision Provider using MedSAM engine.
     
     Implements the AbstractVisionProvider interface for seamless
     integration with the diagnostic pipeline.
@@ -783,14 +825,14 @@ class MedSAM2VisionProvider:
         low_memory_mode: bool = True,
     ):
         """
-        Initialize the MedSAM-2 Vision Provider.
+        Initialize the MedSAM Vision Provider.
         
         Args:
             checkpoint_path: Path to model checkpoints.
             preload_model: Load model immediately at startup.
             low_memory_mode: Enable memory optimization for limited VRAM.
         """
-        self.engine = MedSAM2VisionEngine(
+        self.engine = MedSAMVisionEngine(
             checkpoint_path=checkpoint_path,
             low_memory_mode=low_memory_mode,
         )
@@ -833,7 +875,7 @@ class MedSAM2VisionProvider:
     ) -> VisionMetrics:
         """Convert engine result to VisionMetrics."""
         if result.error:
-            logger.error(f"[MedSAM2] Vision analysis FAILED: {result.error}")
+            logger.error(f"[MedSAM] Vision analysis FAILED: {result.error}")
             return VisionMetrics(
                 risk_score=0.0,
                 findings=[f"Analysis Error: {result.error}"],
@@ -857,3 +899,7 @@ class MedSAM2VisionProvider:
     def get_model_info(self) -> dict:
         """Get information about the vision engine."""
         return self.engine.get_info()
+
+
+# Backward compatibility alias
+MedSAM2VisionProvider = MedSAMVisionProvider

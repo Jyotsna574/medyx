@@ -3,18 +3,27 @@
 # For running run_mas_diagnosis.py with ACTIVE_PROVIDER=local
 #
 # INSTALL ORDER (CRITICAL):
-#   1. Create conda env with Python 3.10 (NOT 3.12):
-#      conda create -n medsam2 python=3.10 -y && conda activate medsam2
+#   1. Create conda env with Python 3.10:
+#      conda create -n medsam python=3.10 -y && conda activate medsam
 #
 #   2. Install PyTorch FIRST (match your CUDA version):
 #      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 #
-#   3. Install SAM-2 from GitHub (NOT PyPI - it doesn't exist there!):
-#      pip install git+https://github.com/facebookresearch/segment-anything-2.git
+#   3. Install MedSAM from GitHub (bowang-lab):
+#      git clone https://github.com/bowang-lab/MedSAM
+#      cd MedSAM && pip install -e .
+#      cd ..
 #
-#   4. Install remaining dependencies:
+#   4. Download MedSAM checkpoint:
+#      bash download_ckpts.sh
+#      # Or manually: wget https://huggingface.co/wanglab/medsam-vit-b/resolve/main/medsam_vit_b.pth -P ./checkpoints/
+#
+#   5. Install remaining dependencies:
 #      pip install -r requirements_cluster.txt
 #
+# Reference:
+#   Ma et al., "Segment Anything in Medical Images", Nature Communications 2024
+#   https://github.com/bowang-lab/MedSAM
 # ================================================================
 
 # Core
@@ -34,8 +43,8 @@ bitsandbytes>=0.43.0
 sentencepiece>=0.2.0
 protobuf>=4.25.0
 
-# Vision (MedSAM-2 dependencies - SAM-2 itself from GitHub)
-numpy>=1.24.0
+# Vision (MedSAM dependencies - MedSAM itself installed from GitHub separately)
+numpy>=1.24.0,<2.0.0  # numpy 2.0 breaks many ML packages
 Pillow>=10.0.0
 scikit-image>=0.22.0
 opencv-python-headless>=4.0.0

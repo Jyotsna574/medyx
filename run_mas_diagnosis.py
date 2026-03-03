@@ -5,10 +5,12 @@ MAS Diagnostic Pipeline - Multi-Agent Medical Diagnosis System.
 Usage:
     python run_mas_diagnosis.py
 
-Environment Variables:
-    ACTIVE_PROVIDER: gemini|openai|anthropic|local (default: gemini)
-    GOOGLE_API_KEY: Required if ACTIVE_PROVIDER=gemini
-    LOCAL_MODEL_PATH: Required if ACTIVE_PROVIDER=local
+Environment:
+    ACTIVE_PROVIDER: gemini (default) | local
+    GOOGLE_API_KEY: Required for gemini
+    LOCAL_MODEL_PATH: Required for local (cluster)
+    MEDSAM2_CHECKPOINT_DIR: MedSAM-2 checkpoints (default: ./checkpoints)
+    HF_HOME: HuggingFace cache for Med42 (default: ~/.cache/huggingface)
 """
 
 import asyncio
@@ -58,15 +60,16 @@ async def run_diagnosis():
     print(f"Patient: {case.patient_age}yo {case.patient_sex} | {case.modality} - {case.target_region}")
     print(f"{'='*60}\n")
     
+    checkpoint_dir = os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints")
     orchestrator = MASOrchestrator(
-        checkpoint_path="./checkpoints",
+        checkpoint_path=checkpoint_dir,
         low_memory_mode=True,
         log_level="INFO",
         log_file="./mas_diagnosis.log",
     )
     
     try:
-        report, discussion = await orchestrator.run_diagnosis(
+        report, _ = await orchestrator.run_diagnosis(
             case=case,
             anatomical_bbox=anatomical_bbox,
         )
@@ -102,20 +105,16 @@ async def run_diagnosis():
 
 if __name__ == "__main__":
     provider = os.getenv("ACTIVE_PROVIDER", "gemini")
-    
-    if provider == "local":
-        print(f"Provider: local | Model: {os.getenv('LOCAL_MODEL_PATH', 'not set')}")
-    elif provider == "gemini" and not os.getenv("GOOGLE_API_KEY"):
+    if provider not in ("gemini", "local"):
+        print(f"ERROR: ACTIVE_PROVIDER must be gemini or local (got: {provider})")
+        sys.exit(1)
+    if provider == "gemini" and not os.getenv("GOOGLE_API_KEY"):
         print("ERROR: GOOGLE_API_KEY not set")
         sys.exit(1)
-    elif provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-        print("ERROR: OPENAI_API_KEY not set")
-        sys.exit(1)
-    elif provider == "anthropic" and not os.getenv("ANTHROPIC_API_KEY"):
-        print("ERROR: ANTHROPIC_API_KEY not set")
-        sys.exit(1)
+    if provider == "local":
+        print(f"Provider: local | Model: {os.getenv('LOCAL_MODEL_PATH', 'not set')}")
     else:
-        print(f"Provider: {provider}")
-    
+        print("Provider: gemini")
+
     result = asyncio.run(run_diagnosis())
     sys.exit(0 if result else 1)
