@@ -5,6 +5,13 @@ Provides CAMEL-AI compatible backends: Gemini (cloud) or local HuggingFace.
 
 Environment: ACTIVE_PROVIDER=gemini|local, GOOGLE_API_KEY, LOCAL_MODEL_PATH,
              HF_HOME (HuggingFace cache dir, e.g. /scratch/.../huggingface)
+
+Caching:
+    Local HuggingFace backends are cached as a process-level singleton so the
+    model is loaded into GPU memory only once per process, regardless of how
+    many times get_llm_backend() is called.
+
+    Call reset_llm_cache() to force a reload (e.g. after an OOM error).
 """
 
 import gc
@@ -16,6 +23,9 @@ from camel.models.base_model import BaseModelBackend
 from camel.types import ModelType
 
 from config.settings import model_config
+
+# Process-level singleton cache: keyed by (provider, model_path)
+_backend_cache: Dict[str, Any] = {}
 
 
 # Lazy imports for heavy dependencies
@@ -621,39 +631,56 @@ class HuggingFaceModelBackend(BaseModelBackend):
 def get_llm_backend(provider: Optional[str] = None):
     """
     Factory function to get the appropriate LLM backend.
-    
-    Returns a model backend compatible with CAMEL-AI's ChatAgent.
-    The backend is determined by configuration (models.yaml) and
-    environment variables (ACTIVE_PROVIDER, LOCAL_ACTIVE_MODEL, LOCAL_MODEL_PATH).
-    
+
+    Local HuggingFace backends are cached as a process-level singleton — the
+    model weights are loaded into GPU memory only on the first call. Subsequent
+    calls within the same process return the cached instance immediately.
+
     Args:
         provider: Override the active provider. If None, uses config.
-        
+
     Returns:
         Model backend compatible with CAMEL-AI ChatAgent.
-        
-    Raises:
-        ValueError: If required API keys or configurations are missing.
-        
-    Example:
-        # Use default provider from config
-        model = get_llm_backend()
-        agent = ChatAgent(system_message=..., model=model)
-        
-        # Override provider
-        model = get_llm_backend(provider="local")
     """
-    # Reload config to pick up any env var changes
+    global _backend_cache
+
     model_config.reload()
-    
     active_provider = provider or model_config.active_provider
-    
-    print(f"[LLM Factory] Creating backend for provider: {active_provider}")
-    
-    if active_provider == "local":
-        return _create_huggingface_backend()
-    else:
+
+    # Cloud backends are stateless (just an API key wrapper) — no need to cache
+    if active_provider != "local":
         return _create_camel_backend(active_provider)
+
+    # Local backends: build a cache key from provider + model path
+    local_path = model_config.get_local_model_path() or model_config.get_local_model_config().get("repo_id", "")
+    cache_key = f"local::{local_path}"
+
+    if cache_key in _backend_cache:
+        print(f"[LLM Factory] Reusing cached backend for: {local_path}")
+        return _backend_cache[cache_key]
+
+    print(f"[LLM Factory] Loading local model (first time): {local_path}")
+    backend = _create_huggingface_backend()
+    _backend_cache[cache_key] = backend
+    return backend
+
+
+def reset_llm_cache() -> None:
+    """
+    Evict the cached LLM backend and release GPU memory.
+
+    Call this if you hit an OOM error and want to force a clean reload on
+    the next get_llm_backend() call.
+    """
+    global _backend_cache
+    for backend in _backend_cache.values():
+        try:
+            backend.unload()
+        except Exception:
+            pass
+    _backend_cache.clear()
+    gc.collect()
+    print("[LLM Factory] Backend cache cleared.")
 
 
 def _create_camel_backend(provider: str):
