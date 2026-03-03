@@ -6,8 +6,10 @@
 #   1. Create conda env with Python 3.10:
 #      conda create -n medsam python=3.10 -y && conda activate medsam
 #
-#   2. Install PyTorch FIRST (match your CUDA version):
+#   2. Install PyTorch + torchvision FIRST (match your CUDA version):
 #      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#      NOTE: torchvision is required by segment_anything (MedSAM). Without it you get
+#            "No module named 'torchvision'" at runtime.
 #
 #   3. Install MedSAM from GitHub (bowang-lab):
 #      git clone https://github.com/bowang-lab/MedSAM

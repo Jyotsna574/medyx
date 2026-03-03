@@ -21,6 +21,9 @@ MODELS_BASE="${MODELS_BASE:-/scratch/ed21b031/models}"
 export ACTIVE_PROVIDER=local
 export LOCAL_MODEL_PATH="${LOCAL_MODEL_PATH:-$MODELS_BASE/med42_8b}"
 
+# MedSAM: path to cloned MedSAM repo (where segment_anything lives after pip install -e .)
+export MEDSAM_ROOT="${MEDSAM_ROOT:-/scratch/ed21b031/medsam2}"
+
 # MedSAM: checkpoint dir; download once, reuse on subsequent runs
 export MEDSAM_CHECKPOINT_DIR="${MEDSAM_CHECKPOINT_DIR:-$MODELS_BASE/medsam_checkpoints}"
 

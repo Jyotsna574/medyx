@@ -724,7 +724,7 @@ Provide structured output using the required format.""",
         # Log metrics - warn if all zeros (indicates failed segmentation)
         if metrics.pixel_area == 0:
             logger.error(f"[VisionAnalysisAgent] FAILED - pixel_area=0, confidence={metrics.confidence_score:.1%}")
-            logger.error("[VisionAnalysisAgent] Check: SAM-2 installed? Checkpoint exists? Image valid?")
+            logger.error("[VisionAnalysisAgent] Check: torchvision installed? MedSAM installed (MEDSAM_ROOT set)? Checkpoint exists? Image valid?")
         else:
             logger.info(f"[VisionAnalysisAgent] OK - area={metrics.pixel_area:,}px, circ={metrics.circularity:.3f}, conf={metrics.confidence_score:.1%}")
         

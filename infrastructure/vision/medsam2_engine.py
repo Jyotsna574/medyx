@@ -85,15 +85,28 @@ def _lazy_import_medsam():
     """Lazily import MedSAM/segment_anything modules."""
     global segment_anything
     if segment_anything is None:
+        # Allow pointing to a custom MedSAM install dir on HPC clusters
+        medsam_root = os.environ.get("MEDSAM_ROOT")
+        if medsam_root:
+            import sys
+            if medsam_root not in sys.path:
+                sys.path.insert(0, medsam_root)
+                logger.info(f"[MedSAM] Added MEDSAM_ROOT to sys.path: {medsam_root}")
         try:
+            import torchvision  # noqa: F401 - required by segment_anything
             from segment_anything import sam_model_registry, SamPredictor
             segment_anything = {
                 "sam_model_registry": sam_model_registry,
                 "SamPredictor": SamPredictor,
             }
         except ImportError as e:
-            logger.error(f"[MedSAM] segment_anything import FAILED: {e}")
-            logger.error("[MedSAM] Install MedSAM: git clone https://github.com/bowang-lab/MedSAM && cd MedSAM && pip install -e .")
+            missing = str(e).replace("No module named ", "").strip("'")
+            logger.error(f"[MedSAM] Import FAILED - missing package: {missing}")
+            if "torchvision" in str(e):
+                logger.error("[MedSAM] Fix: pip install torchvision --index-url https://download.pytorch.org/whl/cu121")
+            elif "segment_anything" in str(e):
+                logger.error("[MedSAM] Fix: git clone https://github.com/bowang-lab/MedSAM && cd MedSAM && pip install -e .")
+                logger.error("[MedSAM]      Or set MEDSAM_ROOT=/scratch/ed21b031/medsam2 to point to your install.")
             segment_anything = None
     return segment_anything
 
