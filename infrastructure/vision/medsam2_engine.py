@@ -203,8 +203,8 @@ class MedSAMVisionEngine(VisionBackend):
         
         try:
             # Checkpoint must exist - no auto-download on cluster
-            checkpoint_file = Path(self.checkpoint_path)
-            if not checkpoint_file.exists():
+            checkpoint_file = Path(self.checkpoint_path) if self.checkpoint_path else None
+            if not checkpoint_file or not checkpoint_file.is_file():
                 logger.error(f"[MedSAMVisionEngine] Checkpoint NOT FOUND: {checkpoint_file}")
                 logger.error("[MedSAMVisionEngine] Set MEDSAM_CHECKPOINT_PATH to your .pth file:")
                 logger.error("[MedSAMVisionEngine]   export MEDSAM_CHECKPOINT_PATH=/scratch/ed21b031/models/medsam_checkpoints/sam_vit_b_01ec64.pth")

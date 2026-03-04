@@ -498,14 +498,14 @@ class MASOrchestrator:
         Initialize the MAS Orchestrator.
         
         Args:
-            checkpoint_path: Path to MedSAM-2 checkpoints. Defaults to MEDSAM2_CHECKPOINT_DIR env.
+            checkpoint_path: Full path to MedSAM .pth checkpoint file. Defaults to MEDSAM_CHECKPOINT_PATH env.
             low_memory_mode: Enable GPU memory optimization.
             log_level: Logging level (DEBUG, INFO, WARNING, ERROR).
             log_file: Optional file path for logging output.
         """
         configure_logging(log_level, log_file)
-        
-        ckpt = checkpoint_path or os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints")
+
+        ckpt = checkpoint_path or os.environ.get("MEDSAM_CHECKPOINT_PATH")
         
         logger.info("=" * 60)
         logger.info("Initializing Multi-Agent System Orchestrator")
@@ -1093,7 +1093,7 @@ async def run_mas_diagnosis(
     Returns:
         Tuple of (DiagnosticReport, discussion_messages).
     """
-    ckpt = checkpoint_path or os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints")
+    ckpt = checkpoint_path or os.environ.get("MEDSAM_CHECKPOINT_PATH")
     orchestrator = MASOrchestrator(
         checkpoint_path=ckpt,
         low_memory_mode=low_memory_mode,
