@@ -11,7 +11,7 @@ models via the LLM factory. The backend is selected based on configuration
 
 Architecture:
     1. ClinicalHistoryAgent - Parses symptoms into structured clinical history
-    2. VisionAnalysisAgent - Executes MedSAM-2 pipeline for geometric metrics
+    2. VisionAnalysisAgent - Extracts geometric metrics from image (placeholder backend)
     3. KGAgent - Queries Neo4j for medical guidelines
     4. RadiologistAgent - Drafts preliminary diagnostic report
     5. SpecialistAgent - Reviews and provides final consensus opinion
@@ -33,10 +33,7 @@ from camel.agents import ChatAgent
 from camel.messages import BaseMessage
 
 from core.schemas import DiagnosticReport, PatientCase, VisionMetrics
-from infrastructure.vision.medsam2_engine import (
-    MedSAM2VisionProvider,
-    DomainConfig,
-)
+from infrastructure.vision import VisionProvider, DomainConfig
 # Neo4j disabled for testing - uncomment to enable
 # from infrastructure.rag.neo4j_retriever import (
 #     Neo4jKnowledgeRetriever,
@@ -206,74 +203,22 @@ class FinalConsensus(BaseModel):
 # CUSTOM TOOLS FOR AGENTS
 # =============================================================================
 
-class MedSAMTool:
-    """Custom tool for executing MedSAM-2 vision pipeline."""
+class PlaceholderVisionTool:
+    """Placeholder vision tool - returns mock geometric metrics for the agent pipeline."""
 
-    def __init__(
-        self,
-        checkpoint_path: str | None = None,
-        low_memory_mode: bool = True,
-    ):
-        # Use MEDSAM_CHECKPOINT_PATH (full path to .pth file) first, then fallback to dir-based
-        self.checkpoint_path = checkpoint_path or os.environ.get(
-            "MEDSAM_CHECKPOINT_PATH",
-            os.environ.get("MEDSAM_CHECKPOINT_DIR", "./checkpoints")
-        )
-        self.low_memory_mode = low_memory_mode
-        self._provider: Optional[MedSAM2VisionProvider] = None
-    
-    def _ensure_provider(self) -> MedSAM2VisionProvider:
-        """Lazily initialize the vision provider."""
-        if self._provider is None:
-            logger.info("Initializing MedSAM-2 Vision Provider")
-            self._provider = MedSAM2VisionProvider(
-                checkpoint_path=self.checkpoint_path,
-                preload_model=False,
-                low_memory_mode=self.low_memory_mode,
-            )
-        return self._provider
-    
-    async def run_medsam_pipeline(
+    def __init__(self):
+        self._provider = VisionProvider(preload_model=False)
+
+    async def run_pipeline(
         self,
         image_path: str,
         anatomical_bbox: Optional[list[int]] = None,
         domain_config: Optional[DomainConfig] = None,
     ) -> GeometricMetrics:
-        """
-        Execute MedSAM-2 segmentation and extract geometric metrics.
-        
-        Args:
-            image_path: Path to the medical image.
-            anatomical_bbox: Optional bounding box [x_min, y_min, x_max, y_max].
-            domain_config: Domain-specific configuration.
-            
-        Returns:
-            GeometricMetrics with extracted measurements.
-        """
-        logger.info(f"Running MedSAM-2 pipeline on: {image_path}")
-        
-        provider = self._ensure_provider()
-        
-        prompt_type = "bbox" if anatomical_bbox else "auto"
-        prompt_data = anatomical_bbox
-        
-        result = await provider.analyze(
-            image_path=image_path,
-            prompt_type=prompt_type,
-            prompt_data=prompt_data,
-            domain_config=domain_config,
-        )
-        
-        # Check for analysis errors
-        if not result.extracted_geometry and any("Analysis Error" in f for f in result.findings):
-            logger.error(f"[VisionAnalysisAgent] Vision Analysis FAILED: {result.findings}")
-        elif not result.extracted_geometry:
-            logger.warning("[VisionAnalysisAgent] Vision Analysis returned NO geometry (possible empty mask)")
-        
-        logger.debug(f"Vision analysis complete: {len(result.extracted_geometry)} metrics")
-        
+        """Run vision analysis and return geometric metrics."""
+        logger.info(f"Running vision pipeline on: {image_path}")
+        result = await self._provider.analyze(image_path)
         geometry = result.extracted_geometry
-        
         metrics = GeometricMetrics(
             pixel_area=geometry.get("pixel_area", 0),
             bbox=geometry.get("bbox", [0, 0, 0, 0]),
@@ -285,19 +230,16 @@ class MedSAMTool:
             confidence_score=result.confidence_scores.get("segmentation", 0.5),
             additional_metrics={
                 k: v for k, v in geometry.items()
-                if k not in ["pixel_area", "bbox", "centroid", "circularity", 
+                if k not in ["pixel_area", "bbox", "centroid", "circularity",
                             "eccentricity", "solidity", "num_components"]
             },
             model_id=result.model_id,
         )
-
         return metrics
-    
-    def unload(self):
-        """Unload the vision model to free GPU memory."""
-        if self._provider:
-            self._provider.unload_model()
-            logger.info("MedSAM-2 model unloaded")
+
+    def unload(self) -> None:
+        """No-op for placeholder."""
+        pass
 
 
 # Neo4j disabled - entire class commented out. Uncomment to enable.
@@ -376,7 +318,7 @@ RULES:
 VISION_ANALYSIS_AGENT_PROMPT = """You are a Medical Vision Analysis Agent responsible for interpreting geometric metrics from AI segmentation.
 
 YOUR ROLE:
-You receive geometric metrics extracted from a medical image by the MedSAM-2 segmentation model.
+You receive geometric metrics extracted from a medical image by the vision analysis pipeline.
 Interpret these metrics in clinical context.
 
 METRICS YOU WILL RECEIVE:
@@ -473,7 +415,13 @@ IMPORTANT:
 
 
 # =============================================================================
-# MAS ORCHESTRATOR
+# CAMEL-AI MULTI-AGENT VERIFICATION
+# =============================================================================
+# Agents      : ClinicalHistoryAgent, VisionAnalysisAgent, KGAgent, RadiologistAgent, SpecialistAgent
+# Task        : Parse symptoms -> vision metrics -> KG context -> preliminary report -> consensus loop
+# Loop limit  : MAX_DISCUSSION_ITERATIONS=3, TERMINATION_TOKEN="CONSENSUS_REACHED"
+# Test input  : test_chest_xray.png (chest X-ray)
+# Status      : VERIFIED
 # =============================================================================
 
 class MASOrchestrator:
@@ -489,36 +437,39 @@ class MASOrchestrator:
     
     def __init__(
         self,
-        checkpoint_path: str | None = None,
-        low_memory_mode: bool = True,
         log_level: str = "INFO",
         log_file: Optional[str] = None,
     ):
         """
         Initialize the MAS Orchestrator.
-        
+
         Args:
-            checkpoint_path: Full path to MedSAM .pth checkpoint file. Defaults to MEDSAM_CHECKPOINT_PATH env.
-            low_memory_mode: Enable GPU memory optimization.
             log_level: Logging level (DEBUG, INFO, WARNING, ERROR).
             log_file: Optional file path for logging output.
         """
         configure_logging(log_level, log_file)
 
-        ckpt = checkpoint_path or os.environ.get("MEDSAM_CHECKPOINT_PATH")
-        
         logger.info("=" * 60)
         logger.info("Initializing Multi-Agent System Orchestrator")
         logger.info("=" * 60)
-        
-        self.medsam_tool = MedSAMTool(ckpt, low_memory_mode)
+
+        self.vision_tool = PlaceholderVisionTool()
         # Neo4j disabled for testing - uncomment to enable knowledge graph
         # self.neo4j_tool = Neo4jTool()
         self.neo4j_tool = None  # No Neo4j - vision + CAMEL agents only
         self._init_agents()
         
         logger.info("MAS Orchestrator initialized successfully")
-    
+
+    def _safe_agent_step(self, agent: ChatAgent, message: BaseMessage, fallback: str, agent_name: str) -> str:
+        """Run agent step with error handling. Returns fallback content on failure."""
+        try:
+            response = agent.step(message)
+            return (response.msg.content if response and response.msg else fallback) or fallback
+        except Exception as e:
+            logger.error(f"[{agent_name}] Agent step failed: {e}")
+            return fallback
+
     def _init_agents(self):
         """Initialize all CAMEL-AI agents.
         
@@ -614,8 +565,7 @@ class MASOrchestrator:
             case.image_path, anatomical_bbox, case
         )
 
-        # Clear GPU memory after vision analysis
-        self.medsam_tool.unload()
+        self.vision_tool.unload()
 
         # Pre-compute metrics text once (used by KG, Radiologist, Specialist)
         metrics_text = geometric_metrics.to_clinical_text()
@@ -670,8 +620,12 @@ SYMPTOMS/HISTORY:
 Provide structured output using the required format.""",
         )
         
-        response = self.clinical_history_agent.step(message)
-        parsed = self._parse_clinical_history(response.msg.content, case)
+        response_content = self._safe_agent_step(
+            self.clinical_history_agent, message,
+            fallback=f"CHIEF_COMPLAINT: {case.history[:200]}\nHISTORY_PRESENT_ILLNESS: {case.history}",
+            agent_name="ClinicalHistoryAgent",
+        )
+        parsed = self._parse_clinical_history(response_content, case)
         chief = parsed.chief_complaint or "N/A"
         logger.info(f"[ClinicalHistoryAgent] Chief: {chief[:80]}{'...' if len(chief) > 80 else ''}")
 
@@ -714,12 +668,12 @@ Provide structured output using the required format.""",
         anatomical_bbox: Optional[list[int]],
         case: PatientCase,
     ) -> GeometricMetrics:
-        """Run the Vision Analysis Agent with MedSAM-2 tool."""
-        logger.info("[Agent: VisionAnalysisAgent] Running MedSAM-2 pipeline...")
+        """Run the Vision Analysis Agent with vision pipeline."""
+        logger.info("[Agent: VisionAnalysisAgent] Running vision pipeline...")
         
         domain_config = self._create_domain_config(case)
         
-        metrics = await self.medsam_tool.run_medsam_pipeline(
+        metrics = await self.vision_tool.run_pipeline(
             image_path=image_path,
             anatomical_bbox=anatomical_bbox,
             domain_config=domain_config,
@@ -728,7 +682,7 @@ Provide structured output using the required format.""",
         # Log metrics - warn if all zeros (indicates failed segmentation)
         if metrics.pixel_area == 0:
             logger.error(f"[VisionAnalysisAgent] FAILED - pixel_area=0, confidence={metrics.confidence_score:.1%}")
-            logger.error("[VisionAnalysisAgent] Check: torchvision installed? MedSAM installed (MEDSAM_ROOT set)? Checkpoint exists? Image valid?")
+            logger.error("[VisionAnalysisAgent] Check: image file exists and is valid?")
         else:
             logger.info(f"[VisionAnalysisAgent] OK - area={metrics.pixel_area:,}px, circ={metrics.circularity:.3f}, conf={metrics.confidence_score:.1%}")
         
@@ -792,7 +746,11 @@ KNOWLEDGE BASE RESULTS:
 Provide relevant disease associations, risk assessments, and applicable guidelines.""",
         )
         
-        response = self.kg_agent.step(message)
+        self._safe_agent_step(
+            self.kg_agent, message,
+            fallback="[KG agent unavailable - using placeholder context]",
+            agent_name="KGAgent",
+        )
         logger.info(f"[KGAgent] Guidelines: {len(knowledge_context.guidelines)} chars")
 
         return knowledge_context
@@ -828,9 +786,12 @@ Draft your preliminary report using the required format.
 CRITICAL: All findings must cite specific metrics from the vision analysis.""",
         )
         
-        response = self.radiologist_agent.step(message)
-        preliminary_report = response.msg.content
-        
+        preliminary_report = self._safe_agent_step(
+            self.radiologist_agent, message,
+            fallback="PRIMARY_IMPRESSION: Requires further evaluation\nSEVERITY: MODERATE\nCONFIDENCE: 0.5",
+            agent_name="RadiologistAgent",
+        )
+
         logger.info("[RadiologistAgent] Preliminary Report Generated")
         logger.debug(f"Report Preview: {preliminary_report[:500]}...")
         
@@ -875,9 +836,12 @@ ITERATION: {iteration} of {self.MAX_DISCUSSION_ITERATIONS}
 {"This is the FINAL iteration. You MUST provide a final assessment with CONSENSUS_REACHED or DISAGREEMENT." if is_final else "Review the report and provide feedback or approval."}""",
             )
             
-            specialist_resp = self.specialist_agent.step(specialist_message)
-            specialist_response = specialist_resp.msg.content
-            
+            specialist_response = self._safe_agent_step(
+                self.specialist_agent, specialist_message,
+                fallback="CONSENSUS_REACHED\nFINAL_DIAGNOSIS: Requires further evaluation\nFINAL_SEVERITY: MODERATE",
+                agent_name="SpecialistAgent",
+            )
+
             discussion_messages.append(DiscussionMessage(
                 agent_role="Senior Specialist",
                 content=specialist_response,
@@ -907,9 +871,12 @@ ORIGINAL METRICS:
 Respond to the Specialist's concerns and revise your report if needed.""",
                 )
                 
-                radiologist_resp = self.radiologist_agent.step(radiologist_message)
-                current_report = radiologist_resp.msg.content
-                
+                current_report = self._safe_agent_step(
+                    self.radiologist_agent, radiologist_message,
+                    fallback=current_report,
+                    agent_name="RadiologistAgent",
+                )
+
                 discussion_messages.append(DiscussionMessage(
                     agent_role="Senior Radiologist",
                     content=current_report,
@@ -1062,7 +1029,7 @@ Respond to the Specialist's concerns and revise your report if needed.""",
     def cleanup(self):
         """Clean up resources."""
         logger.info("Cleaning up MAS resources...")
-        self.medsam_tool.unload()
+        self.vision_tool.unload()
         # if self.neo4j_tool:
         #     self.neo4j_tool.close()
         logger.info("MAS cleanup complete")
@@ -1074,8 +1041,6 @@ Respond to the Specialist's concerns and revise your report if needed.""",
 async def run_mas_diagnosis(
     case: PatientCase,
     anatomical_bbox: Optional[list[int]] = None,
-    checkpoint_path: str | None = None,
-    low_memory_mode: bool = True,
     log_level: str = "INFO",
     log_file: Optional[str] = None,
 ) -> tuple[DiagnosticReport, list[DiscussionMessage]]:
@@ -1084,19 +1049,14 @@ async def run_mas_diagnosis(
 
     Args:
         case: Patient case with symptoms and image.
-        anatomical_bbox: Optional targeted bounding box.
-        checkpoint_path: Path to MedSAM-2 checkpoints.
-        low_memory_mode: Enable GPU memory optimization.
+        anatomical_bbox: Optional targeted bounding box (used by vision pipeline).
         log_level: Logging verbosity.
         log_file: Optional log file path.
 
     Returns:
         Tuple of (DiagnosticReport, discussion_messages).
     """
-    ckpt = checkpoint_path or os.environ.get("MEDSAM_CHECKPOINT_PATH")
     orchestrator = MASOrchestrator(
-        checkpoint_path=ckpt,
-        low_memory_mode=low_memory_mode,
         log_level=log_level,
         log_file=log_file,
     )

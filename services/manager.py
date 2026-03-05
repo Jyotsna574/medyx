@@ -2,10 +2,10 @@
 Diagnosis Manager - Main orchestrator for the medical diagnosis workflow.
 
 This module coordinates the complete diagnosis pipeline:
-1. MedSAM-2 Vision AI analyzes the medical image with real segmentation
-2. Knowledge Graph retrieves relevant medical guidelines  
-3. Multi-expert consultation discusses the findings with extracted geometry
-4. Final diagnostic report is generated with metrics-driven reasoning
+1. Vision AI analyzes the medical image (placeholder backend)
+2. Knowledge Graph retrieves relevant medical guidelines
+3. Multi-expert consultation discusses the findings
+4. Final diagnostic report is generated
 """
 
 import asyncio
@@ -18,11 +18,7 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 
 from core.schemas import DiagnosticReport, PatientCase, VisionMetrics
-from infrastructure.vision.vision_provider import VisionProvider
-from infrastructure.vision.medsam2_engine import (
-    MedSAM2VisionProvider,
-    DomainConfig,
-)
+from infrastructure.vision import VisionProvider
 # Neo4j disabled for testing - uncomment to enable
 # from infrastructure.rag.neo4j_retriever import Neo4jKnowledgeRetriever
 from services.squad import run_consultation, ConsultationResult
@@ -47,48 +43,21 @@ class DiagnosisManager:
     Main orchestrator for the medical diagnosis workflow.
     
     Coordinates between:
-    - MedSAM-2 Vision AI (real segmentation and geometric analysis)
+    - Vision AI (placeholder backend)
     - Knowledge Graph (medical guidelines from Neo4j)
     - CAMEL-AI Expert Agents (multi-agent consultation)
     """
 
-    def __init__(
-        self,
-        preload_vision_model: bool = False,
-        use_medsam2: bool = True,
-        checkpoint_path: Optional[str] = None,
-        low_memory_mode: bool = True,
-    ):
+    def __init__(self, preload_vision_model: bool = False):
         """
         Initialize the DiagnosisManager.
-        
+
         Args:
-            preload_vision_model: If True, load vision model at startup.
-            use_medsam2: If True, use MedSAM-2 engine. Otherwise, use placeholder.
-            checkpoint_path: Path to MedSAM-2 checkpoints.
-            low_memory_mode: Enable memory optimization for limited GPU VRAM.
+            preload_vision_model: If True, load vision backend at startup.
         """
-        self.use_medsam2 = use_medsam2
-        self.low_memory_mode = low_memory_mode
-        
-        # Initialize Vision AI Provider
         print("Initializing Vision AI Provider...")
-        if use_medsam2:
-            try:
-                self.vision_provider = MedSAM2VisionProvider(
-                    checkpoint_path=checkpoint_path or os.environ.get("MEDSAM2_CHECKPOINT_DIR", "./checkpoints"),
-                    preload_model=preload_vision_model,
-                    low_memory_mode=low_memory_mode,
-                )
-                print("  Engine: MedSAM-2 (Production)")
-            except Exception as e:
-                print(f"  MedSAM-2 initialization failed: {e}")
-                print("  Falling back to placeholder vision provider")
-                self.vision_provider = VisionProvider(preload_model=preload_vision_model)
-                self.use_medsam2 = False
-        else:
-            self.vision_provider = VisionProvider(preload_model=preload_vision_model)
-            print("  Engine: Placeholder (Development)")
+        self.vision_provider = VisionProvider(preload_model=preload_vision_model)
+        print("  Engine: Placeholder (Development)")
 
         # Neo4j disabled for testing - uncomment to enable knowledge graph
         # print("Initializing Knowledge Graph...")
@@ -107,8 +76,8 @@ class DiagnosisManager:
         anatomical_bbox: Optional[list[int]] = None,
     ) -> DiagnosticReport:
         """
-        Execute the complete diagnosis workflow with MedSAM-2 vision analysis.
-        
+        Execute the complete diagnosis workflow with vision analysis.
+
         Args:
             case: Patient case with history and image path.
             prompt_type: Type of segmentation prompt ('auto', 'bbox', 'point').
@@ -122,29 +91,12 @@ class DiagnosisManager:
         print(f"Starting diagnosis for case: {case.id}")
         print(f"{'='*60}")
         
-        # Determine the prompt to use
-        if anatomical_bbox is not None:
-            prompt_type = "bbox"
-            prompt_data = anatomical_bbox
-        
-        # Create domain configuration based on case
-        domain_config = self._create_domain_config(case)
-        
         # Step 1: Run Vision Analysis (Neo4j disabled - no KG query)
         print("\n[Step 1] Analyzing image...")
         print(f"  Modality: {case.modality}")
         print(f"  Target Region: {case.target_region}")
-        
-        # Prepare vision analysis parameters
-        if self.use_medsam2:
-            vision_task = self.vision_provider.analyze(
-                image_path=case.image_path,
-                prompt_type=prompt_type,
-                prompt_data=prompt_data,
-                domain_config=domain_config,
-            )
-        else:
-            vision_task = self.vision_provider.analyze(case.image_path)
+
+        vision_task = self.vision_provider.analyze(case.image_path)
         
         # Neo4j disabled - use empty guidelines
         # kg_query = f"Find symptoms, treatments, and clinical guidelines for: {case.history}"
@@ -163,12 +115,6 @@ class DiagnosisManager:
             for key, value in list(metrics.extracted_geometry.items())[:5]:
                 print(f"    - {key}: {value}")
         
-        # Clear CUDA memory after vision analysis before agent inference
-        if self.low_memory_mode:
-            print("\n  Clearing GPU memory for agent inference...")
-            if self.use_medsam2:
-                self.vision_provider.unload_model()
-            _clear_cuda_memory()
         
         # Step 2: Run Multi-Expert Consultation with extracted geometry
         print("\n[Step 2] Running expert consultation...")
@@ -189,56 +135,6 @@ class DiagnosisManager:
         
         return report
     
-    def _create_domain_config(self, case: PatientCase) -> Optional[DomainConfig]:
-        """Create domain configuration based on patient case."""
-        if not self.use_medsam2:
-            return None
-        
-        # Map modality and region to domain configuration
-        modality_lower = case.modality.lower()
-        region_lower = case.target_region.lower()
-        
-        if "fundus" in modality_lower or "eye" in region_lower or "retina" in region_lower:
-            return DomainConfig(
-                domain="ophthalmic",
-                modality="fundoscopy",
-                target_structure="optic_disc",
-                compute_ratios=["cdr", "circularity"],
-            )
-        elif "xray" in modality_lower or "x-ray" in modality_lower:
-            if "chest" in region_lower or "lung" in region_lower or "thorax" in region_lower:
-                return DomainConfig(
-                    domain="thoracic",
-                    modality="xray",
-                    target_structure="lung_region",
-                    compute_ratios=["aspect_ratio", "circularity"],
-                )
-        elif "ct" in modality_lower:
-            if "abdomen" in region_lower or "liver" in region_lower:
-                return DomainConfig(
-                    domain="abdominal",
-                    modality="ct",
-                    target_structure="organ",
-                    pixel_spacing_mm=0.7,
-                    slice_thickness_mm=5.0,
-                    compute_ratios=["circularity"],
-                )
-        elif "mri" in modality_lower:
-            return DomainConfig(
-                domain="neurological" if "brain" in region_lower else "general",
-                modality="mri",
-                target_structure=case.target_region,
-                compute_ratios=["circularity", "aspect_ratio"],
-            )
-        
-        # Default generic configuration
-        return DomainConfig(
-            domain="general",
-            modality=case.modality,
-            target_structure=case.target_region,
-            compute_ratios=["circularity", "aspect_ratio"],
-        )
-
     def _create_report(
         self,
         case: PatientCase,

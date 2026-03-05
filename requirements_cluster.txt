@@ -1,31 +1,11 @@
-# Requirements for HPC Cluster (Param Shakti) - Local LLM + Vision
+# Requirements for HPC Cluster - Local LLM + Agent Pipeline
 # ================================================================
-# For running run_mas_diagnosis.py with ACTIVE_PROVIDER=local
+# For run_mas_diagnosis.py with ACTIVE_PROVIDER=local
 #
-# INSTALL ORDER (CRITICAL):
-#   1. Create conda env with Python 3.10:
-#      conda create -n medsam python=3.10 -y && conda activate medsam
-#
-#   2. Install PyTorch + torchvision FIRST (match your CUDA version):
-#      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-#      NOTE: torchvision is required by segment_anything (MedSAM). Without it you get
-#            "No module named 'torchvision'" at runtime.
-#
-#   3. Install MedSAM from GitHub (bowang-lab):
-#      git clone https://github.com/bowang-lab/MedSAM
-#      cd MedSAM && pip install -e .
-#      cd ..
-#
-#   4. Download MedSAM checkpoint:
-#      bash download_ckpts.sh
-#      # Or manually: wget https://huggingface.co/wanglab/medsam-vit-b/resolve/main/medsam_vit_b.pth -P ./checkpoints/
-#
-#   5. Install remaining dependencies:
-#      pip install -r requirements_cluster.txt
-#
-# Reference:
-#   Ma et al., "Segment Anything in Medical Images", Nature Communications 2024
-#   https://github.com/bowang-lab/MedSAM
+# INSTALL:
+#   1. conda create -n medyx python=3.10 -y && conda activate medyx
+#   2. pip install torch --index-url https://download.pytorch.org/whl/cu121  # if using GPU
+#   3. pip install -r requirements_cluster.txt
 # ================================================================
 
 # Core
@@ -45,14 +25,10 @@ bitsandbytes>=0.43.0
 sentencepiece>=0.2.0
 protobuf>=4.25.0
 
-# Vision (MedSAM dependencies - MedSAM itself installed from GitHub separately)
-numpy>=1.24.0,<2.0.0  # numpy 2.0 breaks many ML packages
+# Vision (placeholder - image loading, basic processing)
+numpy>=1.24.0,<2.0.0
 Pillow>=10.0.0
 scikit-image>=0.22.0
-opencv-python-headless>=4.0.0
-scipy>=1.10.0
-einops>=0.7.0
-tqdm>=4.65.0
 
-# Neo4j (optional - set NEO4J_URI in .env)
+# Neo4j (optional)
 neo4j>=5.0.0

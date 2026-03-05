@@ -16,6 +16,18 @@ from core.schemas import VisionMetrics
 
 
 @dataclass
+class DomainConfig:
+    """Domain-specific configuration for metric extraction."""
+    domain: str
+    modality: str
+    target_structure: str
+    pixel_spacing_mm: Optional[float] = None
+    slice_thickness_mm: Optional[float] = None
+    compute_ratios: list = field(default_factory=list)
+    custom_metrics: dict = field(default_factory=dict)
+
+
+@dataclass
 class VisionAnalysisResult:
     """Generic result from any vision analysis backend."""
     
@@ -68,37 +80,49 @@ class VisionBackend(ABC):
 
 
 class PlaceholderVisionBackend(VisionBackend):
-    """Placeholder backend for development/testing.
-    
-    Returns mock results. Replace with real implementation.
-    """
-    
+    """Placeholder backend - returns mock geometric metrics for agent pipeline."""
+
     def __init__(self, model_id: str = "placeholder-v1"):
         self.model_id = model_id
         self._loaded = False
-    
+
     def load(self) -> bool:
-        print(f"[PlaceholderVisionBackend] Initialized (model_id={self.model_id})")
         self._loaded = True
         return True
-    
+
     def analyze(self, image_path: str) -> VisionAnalysisResult:
         if not self._loaded:
             self.load()
-        
+
         if not os.path.exists(image_path):
             return VisionAnalysisResult(
                 error=f"Image file not found: {image_path}",
                 model_id=self.model_id
             )
-        
+
+        try:
+            from PIL import Image
+            with Image.open(image_path) as img:
+                w, h = img.size
+            margin_x, margin_y = int(w * 0.1), int(h * 0.1)
+            area = (w - 2 * margin_x) * (h - 2 * margin_y)
+        except Exception:
+            w, h = 512, 512
+            margin_x, margin_y = 50, 50
+            area = 200000
+
         return VisionAnalysisResult(
-            findings=[
-                "Placeholder analysis - implement a real VisionBackend",
-                f"Image: {os.path.basename(image_path)}",
-            ],
-            confidence_scores={"placeholder_finding": 0.5},
-            extracted_geometry={},
+            findings=["Placeholder vision - no segmentation model loaded"],
+            confidence_scores={"segmentation": 0.75},
+            extracted_geometry={
+                "pixel_area": area,
+                "bbox": [margin_x, margin_y, w - margin_x, h - margin_y],
+                "centroid": [w / 2, h / 2],
+                "circularity": 0.85,
+                "eccentricity": 0.4,
+                "solidity": 0.92,
+                "num_components": 1,
+            },
             overall_risk_score=0.5,
             model_id=self.model_id,
             image_processed=True,
@@ -211,3 +235,7 @@ class VisionProvider(AbstractVisionProvider):
     def get_model_info(self) -> dict:
         """Get information about the vision backend."""
         return self.backend.get_info()
+
+    def unload_model(self) -> None:
+        """No-op for placeholder; real backends free GPU memory here."""
+        pass

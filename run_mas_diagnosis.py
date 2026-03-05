@@ -9,7 +9,6 @@ Environment:
     ACTIVE_PROVIDER: gemini (default) | local
     GOOGLE_API_KEY: Required for gemini
     LOCAL_MODEL_PATH: Required for local (cluster)
-    MEDSAM_CHECKPOINT_PATH: Full path to MedSAM .pth checkpoint file
     HF_HOME: HuggingFace cache for Med42 (default: ~/.cache/huggingface)
 """
 
@@ -60,10 +59,7 @@ async def run_diagnosis():
     print(f"Patient: {case.patient_age}yo {case.patient_sex} | {case.modality} - {case.target_region}")
     print(f"{'='*60}\n")
     
-    checkpoint_dir = os.environ.get("MEDSAM_CHECKPOINT_PATH")
     orchestrator = MASOrchestrator(
-        checkpoint_path=checkpoint_dir,
-        low_memory_mode=True,
         log_level="INFO",
         log_file="./mas_diagnosis.log",
     )
