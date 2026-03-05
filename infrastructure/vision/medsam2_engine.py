@@ -206,8 +206,9 @@ class MedSAMVisionEngine(VisionBackend):
             checkpoint_file = Path(self.checkpoint_path) if self.checkpoint_path else None
             if not checkpoint_file or not checkpoint_file.is_file():
                 logger.error(f"[MedSAMVisionEngine] Checkpoint NOT FOUND: {checkpoint_file}")
-                logger.error("[MedSAMVisionEngine] Set MEDSAM_CHECKPOINT_PATH to your .pth file:")
-                logger.error("[MedSAMVisionEngine]   export MEDSAM_CHECKPOINT_PATH=/scratch/ed21b031/models/medsam_checkpoints/sam_vit_b_01ec64.pth")
+                logger.error("[MedSAMVisionEngine] Set MEDSAM_CHECKPOINT_PATH to the MedSAM fine-tuned .pth file:")
+                logger.error("[MedSAMVisionEngine]   export MEDSAM_CHECKPOINT_PATH=/scratch/ed21b031/models/medsam_checkpoints/medsam_vit_b.pth")
+                logger.error("[MedSAMVisionEngine]   (download with: bash download_ckpts.sh)")
                 return False
 
             logger.info(f"[MedSAMVisionEngine] Loading checkpoint: {checkpoint_file}")

@@ -30,8 +30,10 @@ cd "${PROJECT_DIR}"
 # Path to MedSAM repo (contains segment_anything module)
 export MEDSAM_ROOT="/home/ddp/medyx/MedSAM"
 
-# Full path to SAM checkpoint file (no auto-download on cluster)
-export MEDSAM_CHECKPOINT_PATH="/scratch/ed21b031/models/medsam_checkpoints/sam_vit_b_01ec64.pth"
+# Full path to MedSAM fine-tuned checkpoint (NOT the original SAM weights)
+# Download: bash download_ckpts.sh  →  saves medsam_vit_b.pth (~380MB)
+# Source: https://huggingface.co/wanglab/medsam-vit-b
+export MEDSAM_CHECKPOINT_PATH="/scratch/ed21b031/models/medsam_checkpoints/medsam_vit_b.pth"
 
 # ============================================================
 # Med42-8B Configuration (LLM)
